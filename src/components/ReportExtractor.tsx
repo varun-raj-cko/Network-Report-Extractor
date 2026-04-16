@@ -61,7 +61,7 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 import { ReportSchema } from '@/src/constants/schemas';
-import { parseTN070File, ParsedRecord, getTopValues } from '@/src/lib/parser';
+import { parseTN070File, ParsedRecord, getTopValues, countMatchingRecords } from '@/src/lib/parser';
 import { explainClearingRecord } from '@/src/services/geminiService';
 import { AnalyticsDashboard } from './AnalyticsDashboard';
 import { cn } from '@/lib/utils';
@@ -73,9 +73,16 @@ interface ReportExtractorProps {
   onBack: () => void;
 }
 
+interface UploadedFile {
+  name: string;
+  content: string;
+  lines?: string[];
+  totalLines: number;
+}
+
 export function ReportExtractor({ schemas, networkName, accentColor, onBack }: ReportExtractorProps) {
   const [selectedReportId, setSelectedReportId] = useState<string>(schemas[0].id);
-  const [uploadedFiles, setUploadedFiles] = useState<{ name: string, content: string, totalLines: number }[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [parsedData, setParsedData] = useState<ParsedRecord[]>([]);
   const [filters, setFilters] = useState<{ [key: string]: string }>({});
   const [isDragging, setIsDragging] = useState(false);
@@ -166,82 +173,135 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
     return Object.values(summary).sort((a, b) => a.name.localeCompare(b.name));
   }, [discoveryResults, schemas]);
 
-  const discoveryAll = useCallback((files: { name: string, content: string }[]) => {
+  const discoveryAll = useCallback((files: UploadedFile[]) => {
     const results: { [schemaId: string]: number } = {};
     let firstFoundId: string | null = null;
 
-    schemas.forEach(schema => {
-      let count = 0;
-      let wasIdentified = false;
+    // Create a lookup map for Visa schemas to avoid nested loop during line iteration
+    // Key: "recordTypeCode:tcrCode:tcrSubCode"
+    const visaLookup: Record<string, string[]> = {};
+    const mcSchemas = schemas.filter(s => s.id.startsWith('IP'));
+    
+    schemas.filter(s => !s.id.startsWith('IP')).forEach(s => {
+      const key = `${s.recordTypeCode || ''}:${s.tcrCode || ''}:${s.tcrSubCode || ''}`;
+      if (!visaLookup[key]) visaLookup[key] = [];
+      visaLookup[key].push(s.id);
+      results[s.id] = 0;
+    });
 
-      files.forEach(file => {
-        // For Mastercard TN070, check if the report ID string exists in the file (header/trailer)
-        if (schema.id.startsWith('IP')) {
-          if (file.content.includes(schema.id)) {
-            wasIdentified = true;
-          } else {
-            return;
-          }
+    mcSchemas.forEach(s => results[s.id] = 0);
+
+    files.forEach(file => {
+      // 1. Mastercard Discovery (Header string check)
+      mcSchemas.forEach(schema => {
+        if (file.content.includes(schema.id)) {
+          results[schema.id] = (results[schema.id] || 0) + 1; // Mark as found
         }
-        
-        const fileRecords = parseTN070File(file.content, schema);
-        if (fileRecords.length > 0) wasIdentified = true;
-        count += fileRecords.length;
       });
 
-      if (wasIdentified) {
-        results[schema.id] = count;
-        // Prefer auto-selecting a report that actually has data if possible
-        if (!firstFoundId || (results[firstFoundId] === 0 && count > 0)) {
-          firstFoundId = schema.id;
+      // 2. Visa Discovery (Efficient Line Scan)
+      if (file.lines) {
+        const lines = file.lines;
+        const len = lines.length;
+        for (let i = 0; i < len; i++) {
+          const line = lines[i];
+          if (line.length < 4) continue;
+          
+          const rt = line.substring(0, 2);
+          const tc = line[3];
+          const sub = line.length >= 6 ? line.substring(4, 6) : '';
+
+          // Look for matches
+          // Try specific subcode first
+          const matchKeys = [`${rt}:${tc}:${sub}`, `${rt}:${tc}:`, `${rt}::`];
+          
+          matchKeys.forEach(k => {
+            if (visaLookup[k]) {
+              visaLookup[k].forEach(schemaId => {
+                results[schemaId]++;
+              });
+            }
+          });
         }
+      }
+    });
+
+    // Cleanup and Select
+    Object.keys(results).forEach(sid => {
+      if (results[sid] > 0) {
+        if (!firstFoundId || (results[firstFoundId] === 0)) {
+          firstFoundId = sid;
+        }
+      } else {
+        delete results[sid];
       }
     });
 
     setDiscoveryResults(results);
     
-    // Auto-select first discovered report if current one is not in the new results
     if (firstFoundId && results[selectedReportId] === undefined) {
       setSelectedReportId(firstFoundId);
     }
   }, [schemas, selectedReportId]);
 
-  const processFiles = useCallback(async (files: FileList | File[]) => {
-    const newFiles: { name: string, content: string, totalLines: number }[] = [];
-    
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const content = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (e) => resolve(e.target?.result as string);
-        reader.readAsText(file);
-      });
-      // Count total non-empty lines in the raw file
-      const totalLines = content.split(/\r?\n/).filter(l => l.trim().length > 0).length;
-      newFiles.push({ name: file.name, content, totalLines });
-    }
+  const [isProcessing, setIsProcessing] = useState(false);
 
-    const updatedFiles = [...uploadedFiles, ...newFiles];
-    setUploadedFiles(updatedFiles);
-    discoveryAll(updatedFiles);
-    setFilters({});
+  const processFiles = useCallback(async (files: FileList | File[]) => {
+    setIsProcessing(true);
+    const newFiles: UploadedFile[] = [];
+    
+    // Use a small timeout to allow UI to show loader
+    setTimeout(async () => {
+      try {
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const content = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target?.result as string);
+            reader.readAsText(file);
+          });
+          
+          const lines = content.includes('\n') ? content.split(/\r?\n/) : undefined;
+          const totalLines = lines ? lines.filter(l => l.trim().length > 0).length : (content.length / 175);
+
+          newFiles.push({ name: file.name, content, lines, totalLines: Math.floor(totalLines) });
+        }
+
+        const updatedFiles = [...uploadedFiles, ...newFiles];
+        setUploadedFiles(updatedFiles);
+        discoveryAll(updatedFiles);
+        setFilters({});
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setIsProcessing(false);
+      }
+    }, 100);
   }, [uploadedFiles, discoveryAll]);
 
   // Reactive parsing when reports or files change
   React.useEffect(() => {
-    let allParsedData: ParsedRecord[] = [];
-    uploadedFiles.forEach(file => {
-      groupSchemas.forEach(schema => {
-        const data = parseTN070File(file.content, schema);
-        const dataWithSource = data.map(record => ({
-          ...record,
-          'Source File': file.name,
-          'Record Type Info': schema.name
-        }));
-        allParsedData = allParsedData.concat(dataWithSource);
+    if (uploadedFiles.length === 0) return;
+    
+    setIsProcessing(true);
+    const timer = setTimeout(() => {
+      let allParsedData: ParsedRecord[] = [];
+      uploadedFiles.forEach(file => {
+        groupSchemas.forEach(schema => {
+          const data = parseTN070File(file.content, schema, file.lines);
+          const dataWithSource = data.map(record => ({
+            ...record,
+            'Source File': file.name,
+            'Record Type Info': schema.name
+          }));
+          allParsedData = allParsedData.concat(dataWithSource);
+        });
       });
-    });
-    setParsedData(allParsedData);
+      setParsedData(allParsedData);
+      setIsProcessing(false);
+    }, 50);
+
+    return () => clearTimeout(timer);
   }, [uploadedFiles, groupSchemas]);
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -322,8 +382,38 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
     document.body.removeChild(link);
   };
 
+  const topValuesMap = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    groupFields.forEach(field => {
+      map[field.name] = getTopValues(parsedData, field.name);
+    });
+    return map;
+  }, [parsedData, groupFields]);
+
   return (
-    <div className="flex-1 flex overflow-hidden">
+    <div className="flex-1 flex overflow-hidden relative">
+      <AnimatePresence>
+        {isProcessing && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[100] bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center"
+          >
+            <div className="bg-white p-8 rounded-3xl shadow-2xl border border-gray-100 flex flex-col items-center space-y-4">
+              <div className="relative">
+                <div className="w-16 h-16 border-4 border-gray-100 rounded-full" />
+                <div className="absolute inset-0 border-4 border-t-blue-600 rounded-full animate-spin" style={{ borderColor: `${accentColor} transparent transparent transparent` }} />
+              </div>
+              <div className="text-center">
+                <h3 className="text-lg font-bold text-gray-900">Processing Data</h3>
+                <p className="text-sm text-gray-500">Extracting and validating clearing records...</p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Sidebar */}
       <aside className="w-80 border-r border-[#E5E7EB] bg-white flex flex-col overflow-hidden">
         <div className="p-4 border-b">
@@ -646,7 +736,7 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
                                       </SelectTrigger>
                                       <SelectContent>
                                         <SelectItem value="all">All Values</SelectItem>
-                                        {getTopValues(parsedData, field.name).map(val => (
+                                        {(topValuesMap[field.name] || []).map(val => (
                                           <SelectItem key={val} value={val}>{val}</SelectItem>
                                         ))}
                                       </SelectContent>

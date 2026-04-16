@@ -5,7 +5,18 @@
 
 import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+let aiInstance: GoogleGenAI | null = null;
+
+function getAI() {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey === 'undefined' || apiKey === 'MY_GEMINI_API_KEY') {
+    throw new Error("GEMINI_API_KEY is not configured.");
+  }
+  if (!aiInstance) {
+    aiInstance = new GoogleGenAI({ apiKey });
+  }
+  return aiInstance;
+}
 
 export async function explainClearingRecord(record: Record<string, any>, schemaName: string) {
   const prompt = `
@@ -26,6 +37,7 @@ export async function explainClearingRecord(record: Record<string, any>, schemaN
   `;
 
   try {
+    const ai = getAI();
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: prompt,
@@ -34,6 +46,10 @@ export async function explainClearingRecord(record: Record<string, any>, schemaN
     return response.text;
   } catch (error) {
     console.error("Gemini Error:", error);
-    return "Sorry, I couldn't analyze this record at the moment. Please ensure your GEMINI_API_KEY is configured correctly.";
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes("GEMINI_API_KEY")) {
+      return "The AI Expert is not configured. Please add GEMINI_API_KEY to your environment/secrets.";
+    }
+    return "Sorry, I couldn't analyze this record at the moment.";
   }
 }

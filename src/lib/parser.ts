@@ -12,19 +12,24 @@ export interface ParsedRecord {
   [key: string]: string | number;
 }
 
-export function parseTN070File(content: string, schema: ReportSchema): ParsedRecord[] {
+export function parseTN070File(content: string, schema: ReportSchema, preSplitLines?: string[]): ParsedRecord[] {
   const isMastercard = schema.id.startsWith('IP');
   const totalRecordLength = schema.fields.reduce((sum, field) => sum + field.length, 0);
+  
+  if (totalRecordLength <= 0) return [];
   
   let lines: string[] = [];
   
   if (isMastercard) {
-    // Mastercard TN070 reports often have headers/trailers with the report ID.
-    // We find the section for this specific report.
+    if (preSplitLines) {
+      // If we have pre-split lines, we need to find the section. 
+      // This is trickier with pre-split, so we'll fallback to content for Mastercard if needed.
+      // But usually Mastercard reports are not 100MB+ in this specific tool's usage compared to Visa clearing files.
+    }
+    
     const reportStartIdx = content.indexOf(schema.id);
     if (reportStartIdx === -1) return [];
 
-    // Find the end of this report section (next report or end of file)
     let endIdx = content.indexOf('IP', reportStartIdx + schema.id.length);
     if (endIdx === -1) endIdx = content.length;
     
@@ -33,62 +38,59 @@ export function parseTN070File(content: string, schema: ReportSchema): ParsedRec
     
     lines = rawLines.filter(line => {
       const trimmed = line.trim();
-      if (trimmed.length < totalRecordLength * 0.8) return false; // Too short to be data
-      
-      // Filter out header/trailer lines
+      if (trimmed.length < totalRecordLength * 0.5) return false;
       if (trimmed.includes(schema.id)) return false;
       if (trimmed.includes('RUN DATE')) return false;
       if (trimmed.includes('PAGE ')) return false;
       if (trimmed.includes('REPORT ')) return false;
       if (trimmed.includes('-------')) return false;
-      
       return true;
     });
   } else {
-    // Visa logic (Incoming Clearing File)
-    if (content.includes('\n')) {
+    // Visa logic
+    if (preSplitLines) {
+      lines = preSplitLines.filter(line => {
+        if (line.length < 2) return false;
+        if (schema.recordTypeCode && !line.startsWith(schema.recordTypeCode)) return false;
+        if (schema.tcrCode && line.length >= 4 && line[3] !== schema.tcrCode) return false;
+        if (schema.tcrSubCode && line.length >= 6 && line.substring(4, 6) !== schema.tcrSubCode) return false;
+        return true;
+      });
+    } else if (content.includes('\n')) {
       lines = content.split(/\r?\n/).filter(line => {
-        const trimmed = line.trim();
-        if (trimmed.length === 0) return false;
-        // Filter by record type if specified in schema (usually first 2 chars for Visa)
-        if (schema.recordTypeCode && !trimmed.startsWith(schema.recordTypeCode)) {
-          return false;
-        }
-        // Filter by TCR code if specified (4th character, index 3)
-        if (schema.tcrCode && trimmed.length >= 4 && trimmed[3] !== schema.tcrCode) {
-          return false;
-        }
-        // Filter by TCR sub-code if specified (e.g., DE 1 for TC33.A, index 4-5)
-        if (schema.tcrSubCode && trimmed.length >= 6 && trimmed.substring(4, 6) !== schema.tcrSubCode) {
-          return false;
-        }
+        if (line.length < 2) return false;
+        if (schema.recordTypeCode && !line.startsWith(schema.recordTypeCode)) return false;
+        if (schema.tcrCode && line.length >= 4 && line[3] !== schema.tcrCode) return false;
+        if (schema.tcrSubCode && line.length >= 6 && line.substring(4, 6) !== schema.tcrSubCode) return false;
         return true;
       });
     } else {
-      // If no newlines, assume fixed-width records concatenated
       for (let i = 0; i < content.length; i += totalRecordLength) {
         const record = content.substring(i, i + totalRecordLength);
         if (record.length === totalRecordLength) {
-          // Filter by record type if specified in schema
-          if (schema.recordTypeCode && !record.startsWith(schema.recordTypeCode)) {
-            continue;
-          }
-          // Filter by TCR sub-code if specified
-          if (schema.tcrSubCode && record.length >= 6 && record.substring(4, 6) !== schema.tcrSubCode) {
-            continue;
-          }
+          if (schema.recordTypeCode && !record.startsWith(schema.recordTypeCode)) continue;
+          if (schema.tcrCode && record.length >= 4 && record[3] !== schema.tcrCode) continue;
+          if (schema.tcrSubCode && record.length >= 6 && record.substring(4, 6) !== schema.tcrSubCode) continue;
           lines.push(record);
         }
       }
     }
   }
 
-  return lines.map(line => {
+  // Optimized mapping
+  const parsedRecords: ParsedRecord[] = [];
+  const fields = schema.fields;
+  const fieldsLen = fields.length;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     const record: ParsedRecord = {};
     let offset = 0;
 
-    schema.fields.forEach(field => {
-      const rawValue = line.substring(offset, offset + field.length).trim();
+    for (let j = 0; j < fieldsLen; j++) {
+      const field = fields[j];
+      const flen = field.length;
+      const rawValue = line.substring(offset, offset + flen).trim();
       
       if (field.type === 'Numeric') {
         const num = parseFloat(rawValue);
@@ -97,8 +99,9 @@ export function parseTN070File(content: string, schema: ReportSchema): ParsedRec
         record[field.name] = rawValue;
       }
 
-      // Add human-readable labels for specific fields
       const fieldNameLower = field.name.toLowerCase();
+      // Only do mapping for common fields to save time if needed, 
+      // but let's keep it for now and see if the split/filter was the issue
       if (fieldNameLower.includes('currency') && fieldNameLower.includes('code')) {
         record[`${field.name} (Label)`] = mapValue(record[field.name], CURRENCY_MAP);
       } else if (fieldNameLower.includes('country') && fieldNameLower.includes('code')) {
@@ -111,11 +114,56 @@ export function parseTN070File(content: string, schema: ReportSchema): ParsedRec
         record['IRD (Label)'] = mapValue(record[field.name], IRD_MAP);
       }
       
-      offset += field.length;
-    });
+      offset += flen;
+    }
+    parsedRecords.push(record);
+  }
 
-    return record;
-  });
+  return parsedRecords;
+}
+
+/**
+ * Lightweight discovery function that doesn't do full parsing
+ */
+export function countMatchingRecords(content: string, schema: ReportSchema, lines?: string[]): number {
+  const isMastercard = schema.id.startsWith('IP');
+  
+  if (isMastercard) {
+    return content.includes(schema.id) ? 1 : 0; // Simple check for Mastercard report header
+  }
+
+  // Visa logic - efficient counting
+  let count = 0;
+  if (lines) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.length < 2) continue;
+      if (schema.recordTypeCode && !line.startsWith(schema.recordTypeCode)) continue;
+      if (schema.tcrCode && (line.length < 4 || line[3] !== schema.tcrCode)) continue;
+      if (schema.tcrSubCode && (line.length < 6 || line.substring(4, 6) !== schema.tcrSubCode)) continue;
+      count++;
+    }
+  } else if (content.includes('\n')) {
+    const splitLines = content.split(/\r?\n/);
+    for (let i = 0; i < splitLines.length; i++) {
+      const line = splitLines[i];
+      if (line.length < 2) continue;
+      if (schema.recordTypeCode && !line.startsWith(schema.recordTypeCode)) continue;
+      if (schema.tcrCode && (line.length < 4 || line[3] !== schema.tcrCode)) continue;
+      if (schema.tcrSubCode && (line.length < 6 || line.substring(4, 6) !== schema.tcrSubCode)) continue;
+      count++;
+    }
+  } else {
+    const totalRecordLength = schema.fields.reduce((sum, field) => sum + field.length, 0);
+    if (totalRecordLength <= 0) return 0;
+    for (let i = 0; i < content.length; i += totalRecordLength) {
+      if (schema.recordTypeCode && !content.startsWith(schema.recordTypeCode, i)) continue;
+      if (schema.tcrCode && (i + 3 >= content.length || content[i + 3] !== schema.tcrCode)) continue;
+      if (schema.tcrSubCode && (i + 5 >= content.length || content.substring(i + 4, i + 6) !== schema.tcrSubCode)) continue;
+      count++;
+    }
+  }
+  return count;
 }
 
 export function getTopValues(records: ParsedRecord[], fieldName: string, limit: number = 50): string[] {
