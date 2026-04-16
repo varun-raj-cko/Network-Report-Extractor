@@ -1,0 +1,5 @@
+{
+  "name": "Mastercard TN070 Report Extractor",
+  "description": "Enterprise-grade tool to parse raw Mastercard TN070 files, extract specific report records, and filter/export data to CSV or Excel.",
+  "requestFramePermissions": []
+}
