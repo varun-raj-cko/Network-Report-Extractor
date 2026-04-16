@@ -1,4 +1,12 @@
 import { ReportSchema } from "@/src/constants/schemas";
+import { 
+  CURRENCY_MAP, 
+  COUNTRY_MAP, 
+  MTI_MAP, 
+  FUNCTION_CODE_MAP, 
+  IRD_MAP,
+  mapValue 
+} from "@/src/constants/mappers";
 
 export interface ParsedRecord {
   [key: string]: string | number;
@@ -17,13 +25,10 @@ export function parseTN070File(content: string, schema: ReportSchema): ParsedRec
     if (reportStartIdx === -1) return [];
 
     // Find the end of this report section (next report or end of file)
-    // We look for the next "IP" followed by digits, or a common trailer pattern
-    const remainingContent = content.substring(reportStartIdx);
-    const nextReportMatch = remainingContent.substring(schema.id.length).match(/IP\d{6}/);
-    const reportSection = nextReportMatch 
-      ? remainingContent.substring(0, nextReportMatch.index! + schema.id.length)
-      : remainingContent;
-
+    let endIdx = content.indexOf('IP', reportStartIdx + schema.id.length);
+    if (endIdx === -1) endIdx = content.length;
+    
+    const reportSection = content.substring(reportStartIdx, endIdx);
     const rawLines = reportSection.split(/\r?\n/);
     
     lines = rawLines.filter(line => {
@@ -82,6 +87,20 @@ export function parseTN070File(content: string, schema: ReportSchema): ParsedRec
         record[field.name] = isNaN(num) ? rawValue : num;
       } else {
         record[field.name] = rawValue;
+      }
+
+      // Add human-readable labels for specific fields
+      const fieldNameLower = field.name.toLowerCase();
+      if (fieldNameLower.includes('currency') && fieldNameLower.includes('code')) {
+        record[`${field.name} (Label)`] = mapValue(record[field.name], CURRENCY_MAP);
+      } else if (fieldNameLower.includes('country') && fieldNameLower.includes('code')) {
+        record[`${field.name} (Label)`] = mapValue(record[field.name], COUNTRY_MAP);
+      } else if (fieldNameLower === 'mti' || fieldNameLower === 'mti code') {
+        record['MTI (Label)'] = mapValue(record[field.name], MTI_MAP);
+      } else if (fieldNameLower === 'function code' || fieldNameLower === 'func-cd' || fieldNameLower === 'trans. func.') {
+        record['Function (Label)'] = mapValue(record[field.name], FUNCTION_CODE_MAP);
+      } else if (fieldNameLower === 'ird' || fieldNameLower.includes('rate designator')) {
+        record['IRD (Label)'] = mapValue(record[field.name], IRD_MAP);
       }
       
       offset += field.length;

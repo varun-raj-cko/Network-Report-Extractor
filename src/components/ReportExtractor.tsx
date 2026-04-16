@@ -16,7 +16,13 @@ import {
   X,
   CheckCircle2,
   AlertCircle,
-  ArrowLeft
+  ArrowLeft,
+  LayoutDashboard,
+  BrainCircuit,
+  Loader2,
+  ExternalLink,
+  FileSearch,
+  Zap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
@@ -49,11 +55,15 @@ import {
   DialogDescription, 
   DialogHeader, 
   DialogTitle, 
-  DialogTrigger 
+  DialogTrigger,
+  DialogFooter
 } from '@/components/ui/dialog';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 import { ReportSchema } from '@/src/constants/schemas';
 import { parseTN070File, ParsedRecord, getTopValues } from '@/src/lib/parser';
+import { explainClearingRecord } from '@/src/services/geminiService';
+import { AnalyticsDashboard } from './AnalyticsDashboard';
 import { cn } from '@/lib/utils';
 
 interface ReportExtractorProps {
@@ -69,11 +79,45 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
   const [parsedData, setParsedData] = useState<ParsedRecord[]>([]);
   const [filters, setFilters] = useState<{ [key: string]: string }>({});
   const [isDragging, setIsDragging] = useState(false);
+  const [activeTab, setActiveTab] = useState('table');
+  const [discoveryResults, setDiscoveryResults] = useState<{ [schemaId: string]: number }>({});
+  
+  // AI Expert State
+  const [isExplaining, setIsExplaining] = useState(false);
+  const [selectedExplanation, setSelectedExplanation] = useState<string | null>(null);
+  const [activeExplainRecord, setActiveExplainRecord] = useState<ParsedRecord | null>(null);
 
   const selectedReport = useMemo(() => 
     schemas.find(r => r.id === selectedReportId) || schemas[0],
     [selectedReportId, schemas]
   );
+
+  const discoveryAll = useCallback((files: { name: string, content: string }[]) => {
+    const results: { [schemaId: string]: number } = {};
+    let firstFoundId: string | null = null;
+
+    schemas.forEach(schema => {
+      let count = 0;
+      files.forEach(file => {
+        // Fast path for Mastercard: check if ID exists in string
+        if (schema.id.startsWith('IP') && !file.content.includes(schema.id)) {
+          return;
+        }
+        count += parseTN070File(file.content, schema).length;
+      });
+      if (count > 0) {
+        results[schema.id] = count;
+        if (!firstFoundId) firstFoundId = schema.id;
+      }
+    });
+
+    setDiscoveryResults(results);
+    
+    // Auto-select first discovered report if current one has no records
+    if (firstFoundId && (!results[selectedReportId] || results[selectedReportId] === 0)) {
+      setSelectedReportId(firstFoundId);
+    }
+  }, [schemas, selectedReportId]);
 
   const processFiles = useCallback(async (files: FileList | File[]) => {
     const newFiles: { name: string, content: string, totalLines: number }[] = [];
@@ -90,25 +134,25 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
       newFiles.push({ name: file.name, content, totalLines });
     }
 
-    setUploadedFiles(prev => [...prev, ...newFiles]);
-    
-    // Re-parse all files with current schema
-    const allParsedData: ParsedRecord[] = [];
     const updatedFiles = [...uploadedFiles, ...newFiles];
-    
-    updatedFiles.forEach(file => {
+    setUploadedFiles(updatedFiles);
+    discoveryAll(updatedFiles);
+    setFilters({});
+  }, [uploadedFiles, discoveryAll]);
+
+  // Reactive parsing when reports or files change
+  React.useEffect(() => {
+    const allParsedData: ParsedRecord[] = [];
+    uploadedFiles.forEach(file => {
       const data = parseTN070File(file.content, selectedReport);
-      // Add source file info to each record
       const dataWithSource = data.map(record => ({
         ...record,
         'Source File': file.name
       }));
       allParsedData.push(...dataWithSource);
     });
-
     setParsedData(allParsedData);
-    setFilters({});
-  }, [selectedReport, uploadedFiles]);
+  }, [uploadedFiles, selectedReport]);
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files) {
@@ -138,6 +182,24 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
       ...prev,
       [fieldName]: value === 'all' ? '' : value
     }));
+  };
+
+  const handleExplain = async (record: ParsedRecord) => {
+    setActiveExplainRecord(record);
+    setIsExplaining(true);
+    setSelectedExplanation(null);
+    
+    // Create a version of the record without internal labels for AI
+    const rawRecord: Record<string, any> = {};
+    Object.entries(record).forEach(([key, val]) => {
+      if (!key.endsWith('(Label)') && key !== 'Source File') {
+        rawRecord[key] = val;
+      }
+    });
+
+    const explanation = await explainClearingRecord(rawRecord, selectedReport.name);
+    setSelectedExplanation(explanation || null);
+    setIsExplaining(false);
   };
 
   const filteredData = useMemo(() => {
@@ -328,12 +390,12 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
                   className="space-y-6"
                 >
                   {/* Summary Section */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <Card className="bg-white border-gray-100 shadow-sm col-span-full">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Card className="bg-white border-gray-100 shadow-sm">
                       <CardHeader className="p-4 pb-2">
                         <CardTitle className="text-sm font-bold flex items-center gap-2">
                           <CheckCircle2 className="w-4 h-4 text-green-500" />
-                          File Processing Summary
+                          File Upload Stats
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="p-4 pt-0">
@@ -342,31 +404,69 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
                             <TableHeader>
                               <TableRow className="hover:bg-transparent border-b">
                                 <TableHead className="h-8 text-[10px] font-bold uppercase text-gray-500">File Name</TableHead>
-                                <TableHead className="h-8 text-[10px] font-bold uppercase text-gray-500 text-right">Extracted Records</TableHead>
                                 <TableHead className="h-8 text-[10px] font-bold uppercase text-gray-500 text-right">Total Lines</TableHead>
-                                <TableHead className="h-8 text-[10px] font-bold uppercase text-gray-500 text-right">Match Rate</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {uploadedFiles.map(file => {
-                                const extractedCount = parsedData.filter(r => r['Source File'] === file.name).length;
-                                const rate = file.totalLines > 0 ? (extractedCount / file.totalLines * 100).toFixed(1) : '0';
-                                return (
-                                  <TableRow key={file.name} className="hover:bg-gray-50/50">
-                                    <TableCell className="py-2 text-xs font-medium text-gray-700">{file.name}</TableCell>
-                                    <TableCell className="py-2 text-xs text-right font-mono font-bold text-gray-900">{extractedCount}</TableCell>
-                                    <TableCell className="py-2 text-xs text-right font-mono text-gray-500">{file.totalLines}</TableCell>
-                                    <TableCell className="py-2 text-xs text-right">
-                                      <Badge variant="secondary" className="text-[9px] font-bold">
-                                        {rate}%
-                                      </Badge>
-                                    </TableCell>
-                                  </TableRow>
-                                );
-                              })}
+                              {uploadedFiles.map(file => (
+                                <TableRow key={file.name} className="hover:bg-gray-50/50">
+                                  <TableCell className="py-2 text-xs font-medium text-gray-700">{file.name}</TableCell>
+                                  <TableCell className="py-2 text-xs text-right font-mono text-gray-500">{file.totalLines}</TableCell>
+                                </TableRow>
+                              ))}
                             </TableBody>
                           </Table>
                         </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="bg-white border-gray-100 shadow-sm border-l-4" style={{ borderLeftColor: accentColor }}>
+                      <CardHeader className="p-4 pb-2">
+                        <CardTitle className="text-sm font-bold flex items-center justify-between">
+                          <div className="flex items-center gap-2 text-gray-900">
+                            <FileSearch className="w-4 h-4" style={{ color: accentColor }} />
+                            Auto-Discovered Records
+                          </div>
+                          <Badge variant="outline" className="text-[10px] font-bold py-0 h-5">
+                            {Object.keys(discoveryResults).length} Types Identified
+                          </Badge>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="p-4 pt-0">
+                        <ScrollArea className="h-[120px] pr-4">
+                          <div className="space-y-2 py-2">
+                            {Object.entries(discoveryResults).map(([schemaId, count]) => {
+                              const schema = schemas.find(s => s.id === schemaId);
+                              const isActive = selectedReportId === schemaId;
+                              return (
+                                <button
+                                  key={schemaId}
+                                  onClick={() => setSelectedReportId(schemaId)}
+                                  className={cn(
+                                    "w-full flex items-center justify-between p-2 rounded-lg text-left transition-all border",
+                                    isActive 
+                                      ? "bg-gray-50 border-gray-200 ring-1 ring-inset" 
+                                      : "hover:bg-gray-50 border-transparent"
+                                  )}
+                                  style={{ ringColor: isActive ? accentColor : undefined }}
+                                >
+                                  <div className="flex flex-col">
+                                    <span className="text-[11px] font-bold text-gray-900 leading-tight">
+                                      {schema?.name}
+                                    </span>
+                                    <span className="text-[9px] text-gray-500 uppercase font-mono">
+                                      {schemaId}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-mono font-bold text-gray-900">{count}</span>
+                                    {isActive && <Zap className="w-3 h-3" style={{ color: accentColor }} />}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </ScrollArea>
                       </CardContent>
                     </Card>
                   </div>
@@ -374,11 +474,24 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
                   {parsedData.length > 0 ? (
                     <>
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                          <h2 className="text-2xl font-bold tracking-tight">Extracted Records</h2>
-                          <Badge style={{ backgroundColor: accentColor }} className="hover:opacity-90">
-                            {filteredData.length} Records Found
-                          </Badge>
+                        <div className="flex items-center gap-6">
+                          <div className="space-y-1">
+                            <h2 className="text-2xl font-bold tracking-tight">Data Intelligence</h2>
+                            <p className="text-xs text-gray-400">Analysis and extraction for {selectedReport.id}</p>
+                          </div>
+                          
+                          <Tabs value={activeTab} onValueChange={setActiveTab} className="bg-gray-100/50 p-1 rounded-lg">
+                            <TabsList className="bg-transparent border-none">
+                              <TabsTrigger value="table" className="data-[state=active]:bg-white data-[state=active]:shadow-sm gap-2 text-xs">
+                                <TableIcon className="w-3.5 h-3.5" />
+                                Record Explorer
+                              </TabsTrigger>
+                              <TabsTrigger value="dashboard" className="data-[state=active]:bg-white data-[state=active]:shadow-sm gap-2 text-xs">
+                                <LayoutDashboard className="w-3.5 h-3.5" />
+                                Pulse Analytics
+                              </TabsTrigger>
+                            </TabsList>
+                          </Tabs>
                         </div>
                         <div className="flex items-center gap-2">
                           <Button variant="outline" size="sm" onClick={exportToCSV} className="gap-2">
@@ -392,13 +505,19 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
                         </div>
                       </div>
 
-                      <Card className="border-gray-200 overflow-hidden shadow-sm">
-                        <div className="bg-gray-50 border-b p-4 flex flex-wrap gap-3 items-center">
-                          <div className="flex items-center gap-2 text-sm font-bold text-gray-600 mr-2">
-                            <Filter className="w-4 h-4" />
-                            Quick Filters:
-                          </div>
-                          {selectedReport.fields.slice(0, 4).map((field) => (
+                      <Tabs value={activeTab} onValueChange={setActiveTab}>
+                        <TabsContent value="dashboard" className="mt-0">
+                          <AnalyticsDashboard data={parsedData} accentColor={accentColor} />
+                        </TabsContent>
+
+                        <TabsContent value="table" className="mt-0 space-y-6">
+                          <Card className="border-gray-200 overflow-hidden shadow-sm">
+                            <div className="bg-gray-50 border-b p-4 flex flex-wrap gap-3 items-center">
+                              <div className="flex items-center gap-2 text-sm font-bold text-gray-600 mr-2">
+                                <Filter className="w-4 h-4" />
+                                Quick Filters:
+                              </div>
+                              {selectedReport.fields.slice(0, 4).map((field) => (
                             <div key={field.name} className="flex flex-col gap-1">
                               <Select 
                                 value={filters[field.name] || 'all'} 
@@ -467,6 +586,9 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
                             <TableHeader className="bg-gray-50">
                               <TableRow>
                                 <TableHead className="text-[10px] font-bold uppercase text-gray-500 whitespace-nowrap">
+                                  Action
+                                </TableHead>
+                                <TableHead className="text-[10px] font-bold uppercase text-gray-500 whitespace-nowrap">
                                   Source File
                                 </TableHead>
                                 {selectedReport.fields.map((field) => (
@@ -479,20 +601,41 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
                             <TableBody>
                               {filteredData.length > 0 ? (
                                 filteredData.slice(0, 100).map((record, idx) => (
-                                  <TableRow key={idx} className="hover:bg-gray-50/50 transition-colors">
+                                  <TableRow key={idx} className="hover:bg-gray-50/50 transition-colors group/row">
+                                    <TableCell className="py-3">
+                                      <Button 
+                                        variant="ghost" 
+                                        size="xs" 
+                                        onClick={() => handleExplain(record)}
+                                        className="h-6 w-6 p-0 rounded-full hover:bg-white hover:shadow-sm"
+                                        title="Ask AI Expert"
+                                      >
+                                        <BrainCircuit className="w-3.5 h-3.5" style={{ color: accentColor }} />
+                                      </Button>
+                                    </TableCell>
                                     <TableCell className="text-[10px] font-medium text-gray-400 py-3">
                                       {record['Source File']}
                                     </TableCell>
-                                    {selectedReport.fields.map((field) => (
-                                      <TableCell key={field.name} className="text-xs font-mono py-3">
-                                        {record[field.name]}
-                                      </TableCell>
-                                    ))}
+                                    {selectedReport.fields.map((field) => {
+                                      const labelValue = record[`${field.name} (Label)`];
+                                      return (
+                                        <TableCell key={field.name} className="text-xs font-mono py-3">
+                                          <div className="flex flex-col">
+                                            <span>{record[field.name]}</span>
+                                            {labelValue && (
+                                              <span className="text-[9px] text-gray-400 font-sans mt-0.5 truncate max-w-[120px]" title={String(labelValue)}>
+                                                {labelValue}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </TableCell>
+                                      );
+                                    })}
                                   </TableRow>
                                 ))
                               ) : (
                                 <TableRow>
-                                  <TableCell colSpan={selectedReport.fields.length + 1} className="h-32 text-center text-gray-500 italic">
+                                  <TableCell colSpan={selectedReport.fields.length + 2} className="h-32 text-center text-gray-500 italic">
                                     No records match the current filters.
                                   </TableCell>
                                 </TableRow>
@@ -508,24 +651,72 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
                           </div>
                         )}
                       </Card>
-                    </>
+                    </TabsContent>
+                  </Tabs>
+                </>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-20 text-center space-y-4 bg-white rounded-2xl border-2 border-dashed border-gray-100">
+                  <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center">
+                    <Search className="w-8 h-8 text-red-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">No Records Found</h3>
+                    <p className="text-sm text-gray-500 max-w-xs mt-1">
+                      We couldn't find any records matching the <strong>{selectedReport.id}</strong> schema in this file.
+                      Please ensure you've selected the correct report type.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </motion.section>
+          )}
+        </AnimatePresence>
+
+            {/* AI Explanation Dialog */}
+            <Dialog open={!!activeExplainRecord} onOpenChange={(open) => { if (!open) setActiveExplainRecord(null); }}>
+              <DialogContent className="max-w-2xl max-h-[80vh]">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <BrainCircuit className="w-5 h-5" style={{ color: accentColor }} />
+                    AI Clearing Expert Analysis
+                  </DialogTitle>
+                  <DialogDescription>
+                    Gemini Intelligence exploring record from {selectedReport.name}
+                  </DialogDescription>
+                </DialogHeader>
+                
+                <div className="mt-4 bg-gray-50 rounded-xl p-4 border border-gray-100 overflow-hidden font-mono text-[10px] text-gray-600">
+                  <h4 className="font-bold mb-2 uppercase tracking-wider text-gray-400">Raw Data Segment</h4>
+                  <div className="grid grid-cols-3 gap-x-4 gap-y-2 max-h-32 overflow-y-auto pr-2">
+                    {activeExplainRecord && Object.entries(activeExplainRecord)
+                      .filter(([k]) => !k.endsWith('(Label)') && k !== 'Source File')
+                      .map(([k, v]) => (
+                        <div key={k} className="flex justify-between border-b border-gray-100 py-1">
+                          <span className="font-bold mr-2">{k}:</span>
+                          <span className="text-gray-900">{v}</span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+
+                <ScrollArea className="mt-6 h-[400px] pr-4">
+                  {isExplaining ? (
+                    <div className="flex flex-col items-center justify-center h-full space-y-4 py-20">
+                      <Loader2 className="w-8 h-8 animate-spin" style={{ color: accentColor }} />
+                      <p className="text-sm text-gray-500 animate-pulse">De-coding financial transaction data...</p>
+                    </div>
                   ) : (
-                    <div className="flex flex-col items-center justify-center py-20 text-center space-y-4 bg-white rounded-2xl border-2 border-dashed border-gray-100">
-                      <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center">
-                        <Search className="w-8 h-8 text-red-400" />
-                      </div>
-                      <div>
-                        <h3 className="text-lg font-bold text-gray-900">No Records Found</h3>
-                        <p className="text-sm text-gray-500 max-w-xs mt-1">
-                          We couldn't find any records matching the <strong>{selectedReport.id}</strong> schema in this file.
-                          Please ensure you've selected the correct report type.
-                        </p>
-                      </div>
+                    <div className="space-y-4 text-sm leading-relaxed text-gray-700 whitespace-pre-wrap">
+                      {selectedExplanation || "An error occurred while generating the explanation."}
                     </div>
                   )}
-                </motion.section>
-              )}
-            </AnimatePresence>
+                </ScrollArea>
+                
+                <DialogFooter className="mt-6 pt-4 border-t">
+                  <Button variant="outline" onClick={() => setActiveExplainRecord(null)}>Close Analysis</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
 
             {/* Empty State */}
             {uploadedFiles.length === 0 && (
