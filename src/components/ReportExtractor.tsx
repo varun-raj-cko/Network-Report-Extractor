@@ -229,7 +229,7 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
 
   // Reactive parsing when reports or files change
   React.useEffect(() => {
-    const allParsedData: ParsedRecord[] = [];
+    let allParsedData: ParsedRecord[] = [];
     uploadedFiles.forEach(file => {
       groupSchemas.forEach(schema => {
         const data = parseTN070File(file.content, schema);
@@ -238,7 +238,7 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
           'Source File': file.name,
           'Record Type Info': schema.name
         }));
-        allParsedData.push(...dataWithSource);
+        allParsedData = allParsedData.concat(dataWithSource);
       });
     });
     setParsedData(allParsedData);
