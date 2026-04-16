@@ -70,6 +70,20 @@ export function AnalyticsDashboard({ data, accentColor }: AnalyticsDashboardProp
       .slice(0, 5);
   }, [data]);
 
+  // 4. Record Type Distribution (H/T/D)
+  const recordTypeData = useMemo(() => {
+    const counts: Record<string, number> = {};
+    data.forEach(r => {
+      const type = String(r['Record Type'] || r['Record Type (D)'] || 'Unknown');
+      let label = type;
+      if (type === 'H') label = 'Header (H)';
+      if (type === 'T') label = 'Trailer (T)';
+      if (type === 'D') label = 'Detail (D)';
+      counts[label] = (counts[label] || 0) + 1;
+    });
+    return Object.entries(counts).map(([name, value]) => ({ name, value }));
+  }, [data]);
+
   const COLORS = [accentColor, '#FACC15', '#22C55E', '#3B82F6', '#A855F7', '#EC4899'];
 
   return (
@@ -212,6 +226,38 @@ export function AnalyticsDashboard({ data, accentColor }: AnalyticsDashboardProp
             </CardContent>
           </Card>
         )}
+
+        <Card className="shadow-sm border-gray-100">
+          <CardHeader>
+            <CardTitle className="text-sm font-bold flex items-center gap-2">
+              <PieChartIcon className="w-4 h-4 text-gray-400" />
+              Record Type Distribution
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="h-[250px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={recordTypeData}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
+                <XAxis 
+                  dataKey="name" 
+                  axisLine={false} 
+                  tickLine={false} 
+                  tick={{ fontSize: 10, fill: '#64748B' }}
+                />
+                <YAxis 
+                  axisLine={false} 
+                  tickLine={false} 
+                  tick={{ fontSize: 10, fill: '#64748B' }}
+                />
+                <Tooltip 
+                  cursor={{ fill: '#F8FAFC' }}
+                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                />
+                <Bar dataKey="value" fill="#94A3B8" radius={[4, 4, 0, 0]} barSize={40} />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

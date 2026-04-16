@@ -11,6 +11,7 @@ export interface ReportSchema {
   fields: SchemaField[];
   recordTypeCode?: string; // Optional filter for record types (e.g., '05', '10')
   tcrCode?: string;        // Optional filter for TCR sequence number (e.g., '0', '1')
+  group?: string;          // Optional group for consolidating multiple TCRs
 }
 
 export const REPORT_SCHEMAS: ReportSchema[] = [
@@ -19,6 +20,7 @@ export const REPORT_SCHEMAS: ReportSchema[] = [
     name: 'Clearing Cycle Acknowledgment Report',
     description: 'Details transactions sent from customers to Mastercard (Mastercard-settled, Bilateral, Global Collection Only, and Non-Financial transactions).',
     fields: [
+      { name: 'Record Type', type: 'Alphanumeric', length: 1 },
       { name: 'Run Date', type: 'Date', length: 8 },
       { name: 'Page No', type: 'Numeric', length: 8 },
       { name: 'Acceptance Brand', type: 'Alphanumeric', length: 3 },
@@ -43,6 +45,7 @@ export const REPORT_SCHEMAS: ReportSchema[] = [
     name: 'Clearing Cycle Notification Report',
     description: 'Details transactions sent from Mastercard to customers (Mastercard-settled, Bilateral, and Non-Financial transactions).',
     fields: [
+      { name: 'Record Type', type: 'Alphanumeric', length: 1 },
       { name: 'Run Date', type: 'Date', length: 8 },
       { name: 'Page', type: 'Numeric', length: 8 },
       { name: 'Acceptance Brand', type: 'Alphanumeric', length: 3 },
@@ -68,6 +71,7 @@ export const REPORT_SCHEMAS: ReportSchema[] = [
     name: 'Clearing Cycle Summary Reconciliation Report',
     description: 'A summary by each clearing cycle by each clearing member ID of clearing cycle activity.',
     fields: [
+      { name: 'Record Type', type: 'Alphanumeric', length: 1 },
       { name: 'Run Date', type: 'Date', length: 8 },
       { name: 'Page', type: 'Numeric', length: 8 },
       { name: 'Acceptance Brand', type: 'Alphanumeric', length: 3 },
@@ -141,6 +145,7 @@ export const REPORT_SCHEMAS: ReportSchema[] = [
     name: 'Clearing Interchange Enhancement Reconciliation Report',
     description: 'Specific details of clearing messages in which the acquirer provided IRD in PDS 0158 subfield 4 is different than the IRD derived by the clearing system.',
     fields: [
+      { name: 'Record Type', type: 'Alphanumeric', length: 1 },
       { name: 'Distribution ICA', type: 'Numeric', length: 11 },
       { name: 'Amount, Transaction', type: 'Numeric', length: 12 },
       { name: 'Amount, Reconciliation', type: 'Numeric', length: 12 },
@@ -165,6 +170,7 @@ export const REPORT_SCHEMAS: ReportSchema[] = [
     name: 'Account Level Management (ALM) Reconciliation Data Report',
     description: 'Offered to acquirers to use with the Interchange Detail Report and Clearing Detail Report to facilitate reconciliation for ALM transactions.',
     fields: [
+      { name: 'Record Type', type: 'Alphanumeric', length: 1 },
       { name: 'Distribution ICA', type: 'Numeric', length: 11 },
       { name: 'MTI', type: 'Numeric', length: 4 },
       { name: 'PAN', type: 'Alphanumeric', length: 19 },
@@ -201,6 +207,7 @@ export const REPORT_SCHEMAS: ReportSchema[] = [
     name: 'Global Collection Only Error Detail - Input Sequence',
     description: 'Details of rejected Global Collection Only transactions.',
     fields: [
+      { name: 'Record Type', type: 'Alphanumeric', length: 1 },
       { name: 'Run Date', type: 'Date', length: 8 },
       { name: 'Page', type: 'Numeric', length: 8 },
       { name: 'File ID', type: 'Alphanumeric', length: 25 },
@@ -229,6 +236,7 @@ export const REPORT_SCHEMAS: ReportSchema[] = [
     name: 'Error Detail - Input Sequence',
     description: 'Provides all Data Elements of a rejected message highlighting the DE in error.',
     fields: [
+      { name: 'Record Type', type: 'Alphanumeric', length: 1 },
       { name: 'Run Date', type: 'Date', length: 8 },
       { name: 'Page', type: 'Numeric', length: 8 },
       { name: 'File ID', type: 'Alphanumeric', length: 25 },
@@ -262,6 +270,7 @@ export const REPORT_SCHEMAS: ReportSchema[] = [
     name: 'Transaction/Chargeback Analysis Report',
     description: 'Life Cycle Volume Analysis for Acquirers/Issuers.',
     fields: [
+      { name: 'Record Type', type: 'Alphanumeric', length: 1 },
       { name: 'Report Name', type: 'Alphanumeric', length: 100 },
       { name: 'Report Number', type: 'Alphanumeric', length: 20 },
       { name: 'Customer ID', type: 'Numeric', length: 11 },
@@ -297,6 +306,7 @@ export const REPORT_SCHEMAS: ReportSchema[] = [
     name: 'Chargeback Activity Summary: Acquirer',
     description: 'Summarizes chargeback activity by reason code.',
     fields: [
+      { name: 'Record Type', type: 'Alphanumeric', length: 1 },
       { name: 'Report Name', type: 'Alphanumeric', length: 100 },
       { name: 'Report Number', type: 'Alphanumeric', length: 20 },
       { name: 'Customer ID', type: 'Numeric', length: 11 },
@@ -320,6 +330,7 @@ export const REPORT_SCHEMAS: ReportSchema[] = [
     name: 'Dollar/Volume Summary Report: Acquirer',
     description: 'Summarizes dollar and transaction volume for acquirers.',
     fields: [
+      { name: 'Record Type', type: 'Alphanumeric', length: 1 },
       { name: 'Transactions', type: 'Numeric', length: 12 },
       { name: 'Dollar Amount', type: 'Numeric', length: 18 },
       { name: 'Financial Detail Debits', type: 'Numeric', length: 18 },
@@ -341,6 +352,7 @@ export const REPORT_SCHEMAS: ReportSchema[] = [
     name: 'Acquirer-funded Reward Presentments Created On Behalf of a Customer Report',
     description: 'Aids acquirers in reconciling promotions that are merchant-funded.',
     fields: [
+      { name: 'Record Type', type: 'Alphanumeric', length: 1 },
       { name: 'TRAN-ORIG', type: 'Alphanumeric', length: 11 },
       { name: 'FILE-ID', type: 'Alphanumeric', length: 25 },
       { name: 'ACCEPTOR', type: 'Alphanumeric', length: 15 },
@@ -368,6 +380,7 @@ export const REPORT_SCHEMAS: ReportSchema[] = [
     name: 'Issuer ICCR Report',
     description: 'For issuers participating in the Issuer Currency Conversation Rate (ICCR) service.',
     fields: [
+      { name: 'Record Type', type: 'Alphanumeric', length: 1 },
       { name: 'ICA', type: 'Alphanumeric', length: 11 },
       { name: 'MTI Code', type: 'Alphanumeric', length: 4 },
       { name: 'Function Code', type: 'Alphanumeric', length: 3 },
@@ -400,6 +413,7 @@ export const REPORT_SCHEMAS: ReportSchema[] = [
     name: 'Cross-Border Fee Manager service reports',
     description: 'For issuers participating in the Cross-Border Fee Manager service.',
     fields: [
+      { name: 'Record Type', type: 'Alphanumeric', length: 1 },
       { name: 'ICA', type: 'Alphanumeric', length: 11 },
       { name: 'MTI Code', type: 'Alphanumeric', length: 4 },
       { name: 'Function Code', type: 'Alphanumeric', length: 3 },
@@ -440,6 +454,7 @@ export const REPORT_SCHEMAS: ReportSchema[] = [
     name: 'Interchange Detail Report',
     description: 'Offered to acquirers in the Europe region and South Africa to comply with regulatory requirements regarding their fees.',
     fields: [
+      { name: 'Record Type', type: 'Alphanumeric', length: 1 },
       { name: 'Acquirer ICA', type: 'Numeric', length: 11 },
       { name: 'MTI', type: 'Numeric', length: 4 },
       { name: 'PAN', type: 'Alphanumeric', length: 19 },

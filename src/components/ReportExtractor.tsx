@@ -81,16 +81,86 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
   const [isDragging, setIsDragging] = useState(false);
   const [activeTab, setActiveTab] = useState('table');
   const [discoveryResults, setDiscoveryResults] = useState<{ [schemaId: string]: number }>({});
-  
+
   // AI Expert State
   const [isExplaining, setIsExplaining] = useState(false);
   const [selectedExplanation, setSelectedExplanation] = useState<string | null>(null);
   const [activeExplainRecord, setActiveExplainRecord] = useState<ParsedRecord | null>(null);
 
+  const sortedSchemas = useMemo(() => {
+    return [...schemas].sort((a, b) => a.name.localeCompare(b.name));
+  }, [schemas]);
+
+  const uniqueReports = useMemo(() => {
+    const seen = new Set<string>();
+    const unique: ReportSchema[] = [];
+    
+    sortedSchemas.forEach(s => {
+      const key = s.group || s.id;
+      if (!seen.has(key)) {
+        seen.add(key);
+        // Create a display-friendly version of the record
+        const displaySchema = { ...s };
+        if (s.group) {
+          displaySchema.name = `${s.group} - Combined Records`;
+          displaySchema.id = s.group;
+        }
+        unique.push(displaySchema);
+      }
+    });
+    return unique;
+  }, [sortedSchemas]);
+
+  const selectedReportGroup = useMemo(() => {
+    const report = schemas.find(r => r.id === selectedReportId || (r.group && r.group === selectedReportId)) || schemas[0];
+    return report.group || report.id;
+  }, [selectedReportId, schemas]);
+
+  const groupSchemas = useMemo(() => {
+    return schemas.filter(s => (s.group || s.id) === selectedReportGroup);
+  }, [selectedReportGroup, schemas]);
+
   const selectedReport = useMemo(() => 
-    schemas.find(r => r.id === selectedReportId) || schemas[0],
-    [selectedReportId, schemas]
+    groupSchemas[0] || schemas[0],
+    [groupSchemas, schemas]
   );
+
+  const groupFields = useMemo(() => {
+    const fieldMap = new Map<string, any>();
+    // Always include Record Type Information as the first field for grouped reports
+    if (groupSchemas.length > 1) {
+      fieldMap.set('Record Type Info', { name: 'Record Type Info', type: 'Alphanumeric', length: 20 });
+    }
+    
+    groupSchemas.forEach(schema => {
+      schema.fields.forEach(field => {
+        if (!fieldMap.has(field.name)) {
+          fieldMap.set(field.name, field);
+        }
+      });
+    });
+    return Array.from(fieldMap.values());
+  }, [groupSchemas]);
+
+  const discoverySummary = useMemo(() => {
+    const summary: { [key: string]: { name: string, count: number, id: string, schemaId: string } } = {};
+    Object.entries(discoveryResults).forEach(([schemaId, count]) => {
+      const c = count as number;
+      const schema = schemas.find(s => s.id === schemaId);
+      if (!schema) return;
+      const key = schema.group || schema.id;
+      if (!summary[key]) {
+        summary[key] = { 
+          name: schema.group ? `${schema.group} - Combined Records` : schema.name, 
+          count: 0, 
+          id: key,
+          schemaId: schema.id
+        };
+      }
+      summary[key].count += c;
+    });
+    return Object.values(summary).sort((a, b) => a.name.localeCompare(b.name));
+  }, [discoveryResults, schemas]);
 
   const discoveryAll = useCallback((files: { name: string, content: string }[]) => {
     const results: { [schemaId: string]: number } = {};
@@ -98,26 +168,39 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
 
     schemas.forEach(schema => {
       let count = 0;
+      let wasIdentified = false;
+
       files.forEach(file => {
-        // Fast path for Mastercard: check if ID exists in string
-        if (schema.id.startsWith('IP') && !file.content.includes(schema.id)) {
-          return;
+        // For Mastercard TN070, check if the report ID string exists in the file (header/trailer)
+        if (schema.id.startsWith('IP')) {
+          if (file.content.includes(schema.id)) {
+            wasIdentified = true;
+          } else {
+            return;
+          }
         }
-        count += parseTN070File(file.content, schema).length;
+        
+        const fileRecords = parseTN070File(file.content, schema);
+        if (fileRecords.length > 0) wasIdentified = true;
+        count += fileRecords.length;
       });
-      if (count > 0) {
+
+      if (wasIdentified) {
         results[schema.id] = count;
-        if (!firstFoundId) firstFoundId = schema.id;
+        // Prefer auto-selecting a report that actually has data if possible
+        if (!firstFoundId || (results[firstFoundId] === 0 && count > 0)) {
+          firstFoundId = schema.id;
+        }
       }
     });
 
     setDiscoveryResults(results);
     
-    // Auto-select first discovered report if current one has no records
-    if (firstFoundId && (!results[selectedReportId] || results[selectedReportId] === 0)) {
+    // Auto-select first discovered report if current one is not in results
+    if (firstFoundId && discoveryResults[selectedReportId] === undefined) {
       setSelectedReportId(firstFoundId);
     }
-  }, [schemas, selectedReportId]);
+  }, [schemas, selectedReportId, discoveryResults]);
 
   const processFiles = useCallback(async (files: FileList | File[]) => {
     const newFiles: { name: string, content: string, totalLines: number }[] = [];
@@ -144,15 +227,18 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
   React.useEffect(() => {
     const allParsedData: ParsedRecord[] = [];
     uploadedFiles.forEach(file => {
-      const data = parseTN070File(file.content, selectedReport);
-      const dataWithSource = data.map(record => ({
-        ...record,
-        'Source File': file.name
-      }));
-      allParsedData.push(...dataWithSource);
+      groupSchemas.forEach(schema => {
+        const data = parseTN070File(file.content, schema);
+        const dataWithSource = data.map(record => ({
+          ...record,
+          'Source File': file.name,
+          'Record Type Info': schema.name
+        }));
+        allParsedData.push(...dataWithSource);
+      });
     });
     setParsedData(allParsedData);
-  }, [uploadedFiles, selectedReport]);
+  }, [uploadedFiles, groupSchemas]);
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files) {
@@ -247,30 +333,17 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="report-select" className="text-xs font-bold text-gray-700">Select Report Type</Label>
-              <Select value={selectedReportId} onValueChange={(val) => {
+              <Select value={selectedReportGroup} onValueChange={(val) => {
                 setSelectedReportId(val);
-                if (uploadedFiles.length > 0) {
-                  const report = schemas.find(r => r.id === val)!;
-                  const allParsedData: ParsedRecord[] = [];
-                  uploadedFiles.forEach(file => {
-                    const data = parseTN070File(file.content, report);
-                    const dataWithSource = data.map(record => ({
-                      ...record,
-                      'Source File': file.name
-                    }));
-                    allParsedData.push(...dataWithSource);
-                  });
-                  setParsedData(allParsedData);
-                  setFilters({});
-                }
+                setFilters({});
               }}>
                 <SelectTrigger id="report-select" className="w-full bg-gray-50 border-gray-200 focus:ring-offset-0">
                   <SelectValue placeholder="Choose a report..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {schemas.map(report => (
+                  {uniqueReports.map(report => (
                     <SelectItem key={report.id} value={report.id}>
-                      {report.id} - {report.name}
+                      {report.group ? report.group : report.id} - {report.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -291,7 +364,7 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
                 <Separator className="my-2" />
                 <ScrollArea className="h-48 pr-4">
                   <div className="space-y-2">
-                    {selectedReport.fields.map((field, idx) => (
+                    {groupFields.map((field, idx) => (
                       <div key={idx} className="flex justify-between items-center text-[10px]">
                         <span className="font-mono text-gray-500">{field.name}</span>
                         <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4 bg-white border-gray-200">
@@ -435,13 +508,12 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
                       <CardContent className="p-4 pt-0">
                         <ScrollArea className="h-[120px] pr-4">
                           <div className="space-y-2 py-2">
-                            {Object.entries(discoveryResults).map(([schemaId, count]) => {
-                              const schema = schemas.find(s => s.id === schemaId);
-                              const isActive = selectedReportId === schemaId;
+                            {discoverySummary.map(({ id, name, count, schemaId }) => {
+                              const isActive = selectedReportGroup === id;
                               return (
                                 <button
-                                  key={schemaId}
-                                  onClick={() => setSelectedReportId(schemaId)}
+                                  key={id}
+                                  onClick={() => setSelectedReportId(id)}
                                   className={cn(
                                     "w-full flex items-center justify-between p-2 rounded-lg text-left transition-all border",
                                     isActive 
@@ -452,14 +524,20 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
                                 >
                                   <div className="flex flex-col">
                                     <span className="text-[11px] font-bold text-gray-900 leading-tight">
-                                      {schema?.name}
+                                      {name}
                                     </span>
                                     <span className="text-[9px] text-gray-500 uppercase font-mono">
-                                      {schemaId}
+                                      {id}
                                     </span>
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    <span className="text-xs font-mono font-bold text-gray-900">{count}</span>
+                                    {count > 0 ? (
+                                      <span className="text-xs font-mono font-bold text-gray-900">{count}</span>
+                                    ) : (
+                                      <Badge variant="outline" className="text-[8px] font-bold text-amber-600 border-amber-200 bg-amber-50">
+                                        Header Found
+                                      </Badge>
+                                    )}
                                     {isActive && <Zap className="w-3 h-3" style={{ color: accentColor }} />}
                                   </div>
                                 </button>
@@ -517,7 +595,7 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
                                 <Filter className="w-4 h-4" />
                                 Quick Filters:
                               </div>
-                              {selectedReport.fields.slice(0, 4).map((field) => (
+                              {groupFields.slice(0, 4).map((field) => (
                             <div key={field.name} className="flex flex-col gap-1">
                               <Select 
                                 value={filters[field.name] || 'all'} 
@@ -552,7 +630,7 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
                                 </DialogDescription>
                               </DialogHeader>
                               <div className="grid grid-cols-2 gap-4 py-4">
-                                {selectedReport.fields.map((field) => (
+                                {groupFields.map((field) => (
                                   <div key={field.name} className="space-y-1.5">
                                     <Label className="text-[10px] font-bold uppercase text-gray-500">{field.name}</Label>
                                     <Select 
@@ -591,7 +669,7 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
                                 <TableHead className="text-[10px] font-bold uppercase text-gray-500 whitespace-nowrap">
                                   Source File
                                 </TableHead>
-                                {selectedReport.fields.map((field) => (
+                                {groupFields.map((field) => (
                                   <TableHead key={field.name} className="text-[10px] font-bold uppercase text-gray-500 whitespace-nowrap">
                                     {field.name}
                                   </TableHead>
@@ -616,12 +694,12 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
                                     <TableCell className="text-[10px] font-medium text-gray-400 py-3">
                                       {record['Source File']}
                                     </TableCell>
-                                    {selectedReport.fields.map((field) => {
+                                    {groupFields.map((field) => {
                                       const labelValue = record[`${field.name} (Label)`];
                                       return (
                                         <TableCell key={field.name} className="text-xs font-mono py-3">
                                           <div className="flex flex-col">
-                                            <span>{record[field.name]}</span>
+                                            <span>{record[field.name] ?? '-'}</span>
                                             {labelValue && (
                                               <span className="text-[9px] text-gray-400 font-sans mt-0.5 truncate max-w-[120px]" title={String(labelValue)}>
                                                 {labelValue}
