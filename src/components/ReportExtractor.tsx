@@ -99,13 +99,17 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
       const key = s.group || s.id;
       if (!seen.has(key)) {
         seen.add(key);
-        // Create a display-friendly version of the record
-        const displaySchema = { ...s };
+        // If it's a group, we create a placeholder schema for display
         if (s.group) {
-          displaySchema.name = `${s.group} - Combined Records`;
-          displaySchema.id = s.group;
+          unique.push({
+            ...s,
+            id: s.group,
+            name: `${s.group} - Combined Records`,
+            description: `Aggregated view for ${s.group} records.`
+          });
+        } else {
+          unique.push(s);
         }
-        unique.push(displaySchema);
       }
     });
     return unique;
@@ -196,11 +200,11 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
 
     setDiscoveryResults(results);
     
-    // Auto-select first discovered report if current one is not in results
-    if (firstFoundId && discoveryResults[selectedReportId] === undefined) {
+    // Auto-select first discovered report if current one is not in the new results
+    if (firstFoundId && results[selectedReportId] === undefined) {
       setSelectedReportId(firstFoundId);
     }
-  }, [schemas, selectedReportId, discoveryResults]);
+  }, [schemas, selectedReportId]);
 
   const processFiles = useCallback(async (files: FileList | File[]) => {
     const newFiles: { name: string, content: string, totalLines: number }[] = [];

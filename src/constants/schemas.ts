@@ -11,6 +11,7 @@ export interface ReportSchema {
   fields: SchemaField[];
   recordTypeCode?: string; // Optional filter for record types (e.g., '05', '10')
   tcrCode?: string;        // Optional filter for TCR sequence number (e.g., '0', '1')
+  tcrSubCode?: string;     // Optional secondary filter for TCR variants (e.g., DE 1 for TC33.A)
   group?: string;          // Optional group for consolidating multiple TCRs
 }
 

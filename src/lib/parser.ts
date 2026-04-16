@@ -58,6 +58,10 @@ export function parseTN070File(content: string, schema: ReportSchema): ParsedRec
         if (schema.tcrCode && trimmed.length >= 4 && trimmed[3] !== schema.tcrCode) {
           return false;
         }
+        // Filter by TCR sub-code if specified (e.g., DE 1 for TC33.A, index 4-5)
+        if (schema.tcrSubCode && trimmed.length >= 6 && trimmed.substring(4, 6) !== schema.tcrSubCode) {
+          return false;
+        }
         return true;
       });
     } else {
@@ -67,6 +71,10 @@ export function parseTN070File(content: string, schema: ReportSchema): ParsedRec
         if (record.length === totalRecordLength) {
           // Filter by record type if specified in schema
           if (schema.recordTypeCode && !record.startsWith(schema.recordTypeCode)) {
+            continue;
+          }
+          // Filter by TCR sub-code if specified
+          if (schema.tcrSubCode && record.length >= 6 && record.substring(4, 6) !== schema.tcrSubCode) {
             continue;
           }
           lines.push(record);
