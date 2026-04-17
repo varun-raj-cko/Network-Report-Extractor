@@ -49,6 +49,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { Checkbox } from '@/components/ui/checkbox';
 import { 
   Dialog, 
   DialogContent, 
@@ -192,10 +193,11 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
     mcSchemas.forEach(s => results[s.id] = 0);
 
     files.forEach(file => {
-      // 1. Mastercard Discovery (Header string check)
+      // 1. Mastercard Discovery (Efficient Identification)
       mcSchemas.forEach(schema => {
-        if (file.content.includes(schema.id)) {
-          results[schema.id] = (results[schema.id] || 0) + 1; // Mark as found
+        const mcCount = countMatchingRecords(file.content, schema, file.lines);
+        if (mcCount > 0) {
+          results[schema.id] = (results[schema.id] || 0) + mcCount;
         }
       });
 
@@ -245,6 +247,14 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
   }, [schemas, selectedReportId]);
 
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
+  const [exportType, setExportType] = useState<'excel' | 'csv'>('excel');
+  const [selectedExportFields, setSelectedExportFields] = useState<string[]>([]);
+
+  // Initialize export fields when report changes
+  React.useEffect(() => {
+    setSelectedExportFields(groupFields.map(f => f.name));
+  }, [groupFields]);
 
   const processFiles = useCallback(async (files: FileList | File[]) => {
     setIsProcessing(true);
@@ -362,14 +372,35 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
   }, [parsedData, filters]);
 
   const exportToExcel = () => {
-    const worksheet = XLSX.utils.json_to_sheet(filteredData);
+    const dataToExport = selectedExportFields.length > 0 
+      ? filteredData.map(record => {
+          const filteredRow: any = {};
+          selectedExportFields.forEach(field => {
+            filteredRow[field] = record[field];
+          });
+          return filteredRow;
+        })
+      : filteredData;
+
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Extracted Records");
     XLSX.writeFile(workbook, `${selectedReport.id}_Extraction.xlsx`);
+    setIsExportDialogOpen(false);
   };
 
   const exportToCSV = () => {
-    const worksheet = XLSX.utils.json_to_sheet(filteredData);
+    const dataToExport = selectedExportFields.length > 0 
+      ? filteredData.map(record => {
+          const filteredRow: any = {};
+          selectedExportFields.forEach(field => {
+            filteredRow[field] = record[field];
+          });
+          return filteredRow;
+        })
+      : filteredData;
+
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const csv = XLSX.utils.sheet_to_csv(worksheet);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
@@ -380,6 +411,28 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setIsExportDialogOpen(false);
+  };
+
+  const handleExportClick = (type: 'excel' | 'csv') => {
+    setExportType(type);
+    setIsExportDialogOpen(true);
+  };
+
+  const toggleExportField = (fieldName: string) => {
+    setSelectedExportFields(prev => 
+      prev.includes(fieldName) 
+        ? prev.filter(f => f !== fieldName)
+        : [...prev, fieldName]
+    );
+  };
+
+  const selectAllFields = () => {
+    setSelectedExportFields(groupFields.map(f => f.name));
+  };
+
+  const deselectAllFields = () => {
+    setSelectedExportFields([]);
   };
 
   const topValuesMap = useMemo(() => {
@@ -423,7 +476,12 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
           </Button>
         </div>
         <div className="p-6">
-          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-widest mb-4">{networkName} Configuration</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-widest">{networkName} Configuration</h2>
+            <Badge variant="outline" className="text-[9px] font-bold py-0 h-4 px-1.5 text-gray-400">
+              v1.4.2
+            </Badge>
+          </div>
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="report-select" className="text-xs font-bold text-gray-700">Select Report Type</Label>
@@ -666,16 +724,68 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
                           </Tabs>
                         </div>
                         <div className="flex items-center gap-2">
-                          <Button variant="outline" size="sm" onClick={exportToCSV} className="gap-2">
+                          <Button variant="outline" size="sm" onClick={() => handleExportClick('csv')} className="gap-2">
                             <FileText className="w-4 h-4" />
                             Export CSV
                           </Button>
-                          <Button variant="default" size="sm" onClick={exportToExcel} style={{ backgroundColor: accentColor }} className="hover:opacity-90 gap-2">
+                          <Button variant="default" size="sm" onClick={() => handleExportClick('excel')} style={{ backgroundColor: accentColor }} className="hover:opacity-90 gap-2">
                             <Download className="w-4 h-4" />
                             Export Excel
                           </Button>
                         </div>
                       </div>
+
+                      <Dialog open={isExportDialogOpen} onOpenChange={setIsExportDialogOpen}>
+                        <DialogContent className="max-w-md">
+                          <DialogHeader>
+                            <DialogTitle>Export Settings</DialogTitle>
+                            <DialogDescription>
+                              Select the fields you want to include in your {exportType === 'excel' ? 'Excel' : 'CSV'} report.
+                            </DialogDescription>
+                          </DialogHeader>
+
+                          <div className="space-y-4 py-4">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-medium">Fields to Include</span>
+                              <div className="flex gap-2">
+                                <Button variant="ghost" size="xs" onClick={selectAllFields} className="text-[10px] h-6 px-2">Select All</Button>
+                                <Button variant="ghost" size="xs" onClick={deselectAllFields} className="text-[10px] h-6 px-2">Deselect All</Button>
+                              </div>
+                            </div>
+
+                            <ScrollArea className="h-[300px] border rounded-md p-4">
+                              <div className="space-y-3">
+                                {groupFields.map(field => (
+                                  <div key={field.name} className="flex items-center space-x-2">
+                                    <Checkbox 
+                                      id={`export-field-${field.name}`} 
+                                      checked={selectedExportFields.includes(field.name)}
+                                      onCheckedChange={() => toggleExportField(field.name)}
+                                    />
+                                    <label
+                                      htmlFor={`export-field-${field.name}`}
+                                      className="text-sm leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                                    >
+                                      {field.name}
+                                    </label>
+                                  </div>
+                                ))}
+                              </div>
+                            </ScrollArea>
+                          </div>
+
+                          <DialogFooter>
+                            <Button variant="outline" onClick={() => setIsExportDialogOpen(false)}>Cancel</Button>
+                            <Button 
+                              onClick={exportType === 'excel' ? exportToExcel : exportToCSV}
+                              disabled={selectedExportFields.length === 0}
+                              style={{ backgroundColor: accentColor }}
+                            >
+                              Download {exportType === 'excel' ? 'Excel' : 'CSV'}
+                            </Button>
+                          </DialogFooter>
+                        </DialogContent>
+                      </Dialog>
 
                       <Tabs value={activeTab} onValueChange={setActiveTab}>
                         <TabsContent value="dashboard" className="mt-0">

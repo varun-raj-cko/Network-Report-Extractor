@@ -55,6 +55,11 @@ export default function App() {
           >
             <div className="max-w-4xl w-full grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="md:col-span-2 text-center mb-4">
+                <div className="flex justify-center mb-4">
+                  <Badge variant="outline" className="bg-white/50 backdrop-blur-sm border-gray-200 text-[10px] font-bold py-0 h-5 px-2">
+                    BETA v1.4.2
+                  </Badge>
+                </div>
                 <h2 className="text-4xl font-black tracking-tight text-gray-900 mb-2">Select Network</h2>
                 <p className="text-gray-500 text-lg">Choose the payment network to begin report extraction and analysis.</p>
               </div>

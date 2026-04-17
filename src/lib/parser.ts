@@ -129,7 +129,30 @@ export function countMatchingRecords(content: string, schema: ReportSchema, line
   const isMastercard = schema.id.startsWith('IP');
   
   if (isMastercard) {
-    return content.includes(schema.id) ? 1 : 0; // Simple check for Mastercard report header
+    if (!content.includes(schema.id)) return 0;
+    
+    // For Mastercard, we find the report section and count lines that look like data
+    const reportStartIdx = content.indexOf(schema.id);
+    let endIdx = content.indexOf('IP', reportStartIdx + schema.id.length);
+    if (endIdx === -1) endIdx = content.length;
+    
+    const reportSection = content.substring(reportStartIdx, endIdx);
+    const rawLines = reportSection.split(/\r?\n/);
+    
+    const totalRecordLength = schema.fields.reduce((sum, field) => sum + field.length, 0);
+
+    return rawLines.filter(line => {
+      const trimmed = line.trim();
+      // Heuristic: line must be at least 50% of the expected record length
+      // and not match common header/footer patterns
+      if (trimmed.length < totalRecordLength * 0.5) return false;
+      if (trimmed.includes(schema.id)) return false;
+      if (trimmed.includes('RUN DATE')) return false;
+      if (trimmed.includes('PAGE ')) return false;
+      if (trimmed.includes('REPORT ')) return false;
+      if (trimmed.includes('-------')) return false;
+      return true;
+    }).length;
   }
 
   // Visa logic - efficient counting
