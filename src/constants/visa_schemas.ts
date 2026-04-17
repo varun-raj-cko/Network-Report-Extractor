@@ -34,6 +34,7 @@ export const VISA_REPORT_SCHEMAS: ReportSchema[] = [
       { name: 'POS Entry Mode', type: 'Numeric', length: 2 },
       { name: 'Central Processing Date', type: 'Date', length: 4 },
       { name: 'Reimbursement Attribute', type: 'Alphanumeric', length: 1 },
+      { name: 'Filler', type: 'Alphanumeric', length: 25 },
     ],
   },
   {
@@ -90,6 +91,7 @@ export const VISA_REPORT_SCHEMAS: ReportSchema[] = [
       { name: 'POS Entry Mode', type: 'Numeric', length: 2 },
       { name: 'Central Processing Date', type: 'Date', length: 4 },
       { name: 'Reimbursement Attribute', type: 'Alphanumeric', length: 1 },
+      { name: 'Filler', type: 'Alphanumeric', length: 25 },
     ],
   },
   {
@@ -113,6 +115,7 @@ export const VISA_REPORT_SCHEMAS: ReportSchema[] = [
       { name: 'Message Text', type: 'Alphanumeric', length: 70 },
       { name: 'Settlement Flag', type: 'Alphanumeric', length: 1 },
       { name: 'Central Processing Date', type: 'Date', length: 4 },
+      { name: 'Filler', type: 'Alphanumeric', length: 27 },
     ],
   },
   {
@@ -136,6 +139,7 @@ export const VISA_REPORT_SCHEMAS: ReportSchema[] = [
       { name: 'Source Currency Code', type: 'Numeric', length: 3 },
       { name: 'Chargeback Reference Number', type: 'Alphanumeric', length: 6 },
       { name: 'Central Processing Date', type: 'Date', length: 4 },
+      { name: 'Filler', type: 'Alphanumeric', length: 49 },
     ],
   },
   {
@@ -159,6 +163,7 @@ export const VISA_REPORT_SCHEMAS: ReportSchema[] = [
       { name: 'Source Currency Code', type: 'Numeric', length: 3 },
       { name: 'Representment Reference Number', type: 'Alphanumeric', length: 6 },
       { name: 'Central Processing Date', type: 'Date', length: 4 },
+      { name: 'Filler', type: 'Alphanumeric', length: 49 },
     ],
   },
   {
@@ -186,6 +191,7 @@ export const VISA_REPORT_SCHEMAS: ReportSchema[] = [
       { name: 'Authorization Code', type: 'Alphanumeric', length: 6 },
       { name: 'POS Entry Mode', type: 'Numeric', length: 2 },
       { name: 'Central Processing Date', type: 'Date', length: 4 },
+      { name: 'Filler', type: 'Alphanumeric', length: 27 },
     ],
   },
   {
@@ -226,7 +232,7 @@ export const VISA_REPORT_SCHEMAS: ReportSchema[] = [
       { name: 'Original ARN', type: 'Alphanumeric', length: 23 },
       { name: 'Documentation Indicator', type: 'Alphanumeric', length: 1 },
       { name: 'Member Message Text', type: 'Alphanumeric', length: 50 },
-      { name: 'Filler', type: 'Alphanumeric', length: 55 },
+      { name: 'Filler', type: 'Alphanumeric', length: 59 },
     ],
   },
   {

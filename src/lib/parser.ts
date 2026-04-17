@@ -21,12 +21,6 @@ export function parseTN070File(content: string, schema: ReportSchema, preSplitLi
   let lines: string[] = [];
   
   if (isMastercard) {
-    if (preSplitLines) {
-      // If we have pre-split lines, we need to find the section. 
-      // This is trickier with pre-split, so we'll fallback to content for Mastercard if needed.
-      // But usually Mastercard reports are not 100MB+ in this specific tool's usage compared to Visa clearing files.
-    }
-    
     const reportStartIdx = content.indexOf(schema.id);
     if (reportStartIdx === -1) return [];
 
@@ -40,44 +34,49 @@ export function parseTN070File(content: string, schema: ReportSchema, preSplitLi
       const trimmed = line.trim();
       if (trimmed.length < totalRecordLength * 0.5) return false;
       if (trimmed.includes(schema.id)) return false;
-      if (trimmed.includes('RUN DATE')) return false;
-      if (trimmed.includes('PAGE ')) return false;
-      if (trimmed.includes('REPORT ')) return false;
-      if (trimmed.includes('-------')) return false;
+      if (trimmed.includes('RUN DATE') || trimmed.includes('PAGE ') || trimmed.includes('REPORT ') || trimmed.includes('-------')) return false;
       return true;
     });
   } else {
-    // Visa logic
+    // Optimized Visa logic
     if (preSplitLines) {
       lines = preSplitLines.filter(line => {
-        if (line.length < 2) return false;
+        if (line.length < 4) return false;
+        if (schema.recordTypeCode && line[0] !== schema.recordTypeCode[0]) return false; // Quick check
         if (schema.recordTypeCode && !line.startsWith(schema.recordTypeCode)) return false;
-        if (schema.tcrCode && line.length >= 4 && line[3] !== schema.tcrCode) return false;
-        if (schema.tcrSubCode && line.length >= 6 && line.substring(4, 6) !== schema.tcrSubCode) return false;
-        return true;
-      });
-    } else if (content.includes('\n')) {
-      lines = content.split(/\r?\n/).filter(line => {
-        if (line.length < 2) return false;
-        if (schema.recordTypeCode && !line.startsWith(schema.recordTypeCode)) return false;
-        if (schema.tcrCode && line.length >= 4 && line[3] !== schema.tcrCode) return false;
-        if (schema.tcrSubCode && line.length >= 6 && line.substring(4, 6) !== schema.tcrSubCode) return false;
+        if (schema.tcrCode && line[3] !== schema.tcrCode) return false;
+        if (schema.tcrSubCode && line.substring(4, 6) !== schema.tcrSubCode) return false;
         return true;
       });
     } else {
-      for (let i = 0; i < content.length; i += totalRecordLength) {
-        const record = content.substring(i, i + totalRecordLength);
-        if (record.length === totalRecordLength) {
-          if (schema.recordTypeCode && !record.startsWith(schema.recordTypeCode)) continue;
-          if (schema.tcrCode && record.length >= 4 && record[3] !== schema.tcrCode) continue;
-          if (schema.tcrSubCode && record.length >= 6 && record.substring(4, 6) !== schema.tcrSubCode) continue;
-          lines.push(record);
+      // Direct scan on content to avoid split() overhead for large files
+      const hasNewlines = content.includes('\n');
+      if (hasNewlines) {
+        const splitLines = content.split(/\r?\n/);
+        for (let i = 0; i < splitLines.length; i++) {
+          const line = splitLines[i];
+          if (line.length < 4) continue;
+          if (schema.recordTypeCode && !line.startsWith(schema.recordTypeCode)) continue;
+          if (schema.tcrCode && line[3] !== schema.tcrCode) continue;
+          if (schema.tcrSubCode && line.substring(4, 6) !== schema.tcrSubCode) continue;
+          lines.push(line);
+        }
+      } else {
+        // Fixed length 168
+        for (let i = 0; i < content.length; i += 168) {
+          const record = content.substring(i, i + 168);
+          if (record.length === 168) {
+            if (schema.recordTypeCode && !record.startsWith(schema.recordTypeCode)) continue;
+            if (schema.tcrCode && record[3] !== schema.tcrCode) continue;
+            if (schema.tcrSubCode && record.substring(4, 6) !== schema.tcrSubCode) continue;
+            lines.push(record);
+          }
         }
       }
     }
   }
 
-  // Optimized mapping
+  // Optimized mapping pass
   const parsedRecords: ParsedRecord[] = [];
   const fields = schema.fields;
   const fieldsLen = fields.length;
@@ -92,25 +91,18 @@ export function parseTN070File(content: string, schema: ReportSchema, preSplitLi
       const flen = field.length;
       const rawValue = line.substring(offset, offset + flen).trim();
       
-      if (field.type === 'Numeric') {
-        const num = parseFloat(rawValue);
-        record[field.name] = isNaN(num) ? rawValue : num;
-      } else {
-        record[field.name] = rawValue;
-      }
+      record[field.name] = field.type === 'Numeric' ? (parseInt(rawValue, 10) || rawValue) : rawValue;
 
-      const fieldNameLower = field.name.toLowerCase();
-      // Only do mapping for common fields to save time if needed, 
-      // but let's keep it for now and see if the split/filter was the issue
-      if (fieldNameLower.includes('currency') && fieldNameLower.includes('code')) {
+      const fn = field.name.toLowerCase();
+      if (fn.includes('currency') && fn.includes('code')) {
         record[`${field.name} (Label)`] = mapValue(record[field.name], CURRENCY_MAP);
-      } else if (fieldNameLower.includes('country') && fieldNameLower.includes('code')) {
+      } else if (fn.includes('country') && fn.includes('code')) {
         record[`${field.name} (Label)`] = mapValue(record[field.name], COUNTRY_MAP);
-      } else if (fieldNameLower === 'mti' || fieldNameLower === 'mti code') {
+      } else if (fn === 'mti' || fn === 'mti code') {
         record['MTI (Label)'] = mapValue(record[field.name], MTI_MAP);
-      } else if (fieldNameLower === 'function code' || fieldNameLower === 'func-cd' || fieldNameLower === 'trans. func.') {
+      } else if (fn === 'function code' || fn === 'func-cd' || fn === 'trans. func.') {
         record['Function (Label)'] = mapValue(record[field.name], FUNCTION_CODE_MAP);
-      } else if (fieldNameLower === 'ird' || fieldNameLower.includes('rate designator')) {
+      } else if (fn === 'ird' || fn.includes('rate designator')) {
         record['IRD (Label)'] = mapValue(record[field.name], IRD_MAP);
       }
       

@@ -178,8 +178,6 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
     const results: { [schemaId: string]: number } = {};
     let firstFoundId: string | null = null;
 
-    // Create a lookup map for Visa schemas to avoid nested loop during line iteration
-    // Key: "recordTypeCode:tcrCode:tcrSubCode"
     const visaLookup: Record<string, string[]> = {};
     const mcSchemas = schemas.filter(s => s.id.startsWith('IP'));
     
@@ -193,7 +191,7 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
     mcSchemas.forEach(s => results[s.id] = 0);
 
     files.forEach(file => {
-      // 1. Mastercard Discovery (Efficient Identification)
+      // 1. Mastercard Discovery
       mcSchemas.forEach(schema => {
         const mcCount = countMatchingRecords(file.content, schema, file.lines);
         if (mcCount > 0) {
@@ -201,29 +199,52 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
         }
       });
 
-      // 2. Visa Discovery (Efficient Line Scan)
-      if (file.lines) {
-        const lines = file.lines;
-        const len = lines.length;
-        for (let i = 0; i < len; i++) {
-          const line = lines[i];
-          if (line.length < 4) continue;
+      // 2. Visa Discovery (Hyper-optimized Scan)
+      const content = file.content;
+      const totalLen = content.length;
+      
+      const hasNewlines = content.includes('\n');
+      
+      if (hasNewlines) {
+        // Optimized line scan without split()
+        let pos = 0;
+        while (pos < totalLen) {
+          let lineEnd = content.indexOf('\n', pos);
+          if (lineEnd === -1) lineEnd = totalLen;
           
-          const rt = line.substring(0, 2);
-          const tc = line[3];
-          const sub = line.length >= 6 ? line.substring(4, 6) : '';
+          const lineLen = lineEnd - pos;
+          if (lineLen >= 4) {
+            const rt = content.substring(pos, pos + 2);
+            const tc = content[pos + 3];
+            const sub = lineLen >= 6 ? content.substring(pos + 4, pos + 6) : '';
 
-          // Look for matches
-          // Try specific subcode first
-          const matchKeys = [`${rt}:${tc}:${sub}`, `${rt}:${tc}:`, `${rt}::`];
+            const k1 = `${rt}:${tc}:${sub}`;
+            if (visaLookup[k1]) visaLookup[k1].forEach(sid => results[sid]++);
+            
+            const k2 = `${rt}:${tc}:`;
+            if (visaLookup[k2]) visaLookup[k2].forEach(sid => results[sid]++);
+            
+            const k3 = `${rt}::`;
+            if (visaLookup[k3]) visaLookup[k3].forEach(sid => results[sid]++);
+          }
+          pos = lineEnd + 1;
+        }
+      } else {
+        // Fixed length 168
+        for (let i = 0; i < totalLen; i += 168) {
+          if (i + 4 > totalLen) break;
+          const rt = content.substring(i, i + 2);
+          const tc = content[i + 3];
+          const sub = (i + 6 <= totalLen) ? content.substring(i + 4, i + 6) : '';
           
-          matchKeys.forEach(k => {
-            if (visaLookup[k]) {
-              visaLookup[k].forEach(schemaId => {
-                results[schemaId]++;
-              });
-            }
-          });
+          const k1 = `${rt}:${tc}:${sub}`;
+          if (visaLookup[k1]) visaLookup[k1].forEach(sid => results[sid]++);
+          
+          const k2 = `${rt}:${tc}:`;
+          if (visaLookup[k2]) visaLookup[k2].forEach(sid => results[sid]++);
+          
+          const k3 = `${rt}::`;
+          if (visaLookup[k3]) visaLookup[k3].forEach(sid => results[sid]++);
         }
       }
     });
@@ -241,7 +262,7 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
 
     setDiscoveryResults(results);
     
-    if (firstFoundId && results[selectedReportId] === undefined) {
+    if (firstFoundId && (results[selectedReportId] === undefined || results[selectedReportId] === 0)) {
       setSelectedReportId(firstFoundId);
     }
   }, [schemas, selectedReportId]);
@@ -260,33 +281,33 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
     setIsProcessing(true);
     const newFiles: UploadedFile[] = [];
     
-    // Use a small timeout to allow UI to show loader
-    setTimeout(async () => {
+    // Process files one by one to avoid memory spikes
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
       try {
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
-          const content = await new Promise<string>((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target?.result as string);
-            reader.readAsText(file);
-          });
-          
-          const lines = content.includes('\n') ? content.split(/\r?\n/) : undefined;
-          const totalLines = lines ? lines.filter(l => l.trim().length > 0).length : (content.length / 175);
+        const content = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.readAsText(file);
+        });
+        
+        // We no longer split large files proactively to save memory
+        // Only split if file is small (e.g. < 5MB)
+        const isSmallFile = file.size < 5 * 1024 * 1024;
+        const lines = isSmallFile && content.includes('\n') ? content.split(/\r?\n/) : undefined;
+        const totalLines = lines ? lines.filter(l => l.trim().length > 0).length : Math.floor(content.length / 168);
 
-          newFiles.push({ name: file.name, content, lines, totalLines: Math.floor(totalLines) });
-        }
-
-        const updatedFiles = [...uploadedFiles, ...newFiles];
-        setUploadedFiles(updatedFiles);
-        discoveryAll(updatedFiles);
-        setFilters({});
+        newFiles.push({ name: file.name, content, lines, totalLines });
       } catch (err) {
-        console.error(err);
-      } finally {
-        setIsProcessing(false);
+        console.error(`Error reading ${file.name}:`, err);
       }
-    }, 100);
+    }
+
+    const updatedFiles = [...uploadedFiles, ...newFiles];
+    setUploadedFiles(updatedFiles);
+    discoveryAll(updatedFiles);
+    setFilters({});
+    setIsProcessing(false);
   }, [uploadedFiles, discoveryAll]);
 
   // Reactive parsing when reports or files change
@@ -304,7 +325,11 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
             'Source File': file.name,
             'Record Type Info': schema.name
           }));
-          allParsedData = allParsedData.concat(dataWithSource);
+          
+          // Use slice for display if data is massive
+          if (allParsedData.length < 5000) {
+             allParsedData = allParsedData.concat(dataWithSource);
+          }
         });
       });
       setParsedData(allParsedData);
