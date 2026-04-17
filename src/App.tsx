@@ -36,7 +36,7 @@ export default function App() {
         </div>
         <div className="flex items-center gap-4">
           <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 px-3 py-1">
-            v1.1.0 - Multi-Network
+            v1.5.0 - Expert Extraction
           </Badge>
           <Button variant="ghost" size="icon" className="rounded-full">
             <Settings className="w-5 h-5 text-gray-500" />
@@ -57,7 +57,7 @@ export default function App() {
               <div className="md:col-span-2 text-center mb-4">
                 <div className="flex justify-center mb-4">
                   <Badge variant="outline" className="bg-white/50 backdrop-blur-sm border-gray-200 text-[10px] font-bold py-0 h-5 px-2">
-                    BETA v1.4.2
+                    BETA v1.5.0
                   </Badge>
                 </div>
                 <h2 className="text-4xl font-black tracking-tight text-gray-900 mb-2">Select Network</h2>
