@@ -22,7 +22,8 @@ import {
   Loader2,
   ExternalLink,
   FileSearch,
-  Zap
+  Zap,
+  Mail
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
@@ -269,8 +270,14 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
-  const [exportType, setExportType] = useState<'excel' | 'csv'>('excel');
+  const [exportType, setExportType] = useState<'excel' | 'csv' | 'email'>('excel');
   const [selectedExportFields, setSelectedExportFields] = useState<string[]>([]);
+  
+  // Email state
+  const [emailAddresses, setEmailAddresses] = useState<string>('');
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [emailSuccess, setEmailSuccess] = useState(false);
 
   // Initialize export fields when report changes
   React.useEffect(() => {
@@ -396,7 +403,35 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
     });
   }, [parsedData, filters]);
 
+  const getReportDateSuffix = useCallback(() => {
+    if (filteredData.length === 0) return '';
+    
+    const dateFields = [
+      'Run Date', 
+      'Central Processing Date', 
+      'Purchase Date', 
+      'Transaction Date', 
+      'Processing Date',
+      'Central Site Business Date',
+      'Central Site Processing Date of Original Message'
+    ];
+    
+    for (const record of filteredData) {
+      for (const field of dateFields) {
+        if (record[field]) {
+          const val = String(record[field]).replace(/[^0-9]/g, '');
+          if (val.length >= 4) {
+            return `_${val}`;
+          }
+        }
+      }
+    }
+    
+    return `_${new Date().toISOString().split('T')[0].replace(/-/g, '')}`;
+  }, [filteredData]);
+
   const exportToExcel = () => {
+    const dateSuffix = getReportDateSuffix();
     const dataToExport = selectedExportFields.length > 0 
       ? filteredData.map(record => {
           const filteredRow: any = {};
@@ -410,11 +445,12 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Extracted Records");
-    XLSX.writeFile(workbook, `${selectedReport.id}_Extraction.xlsx`);
+    XLSX.writeFile(workbook, `${selectedReport.id}${dateSuffix}_Extraction.xlsx`);
     setIsExportDialogOpen(false);
   };
 
   const exportToCSV = () => {
+    const dateSuffix = getReportDateSuffix();
     const dataToExport = selectedExportFields.length > 0 
       ? filteredData.map(record => {
           const filteredRow: any = {};
@@ -431,7 +467,7 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     link.setAttribute("href", url);
-    link.setAttribute("download", `${selectedReport.id}_Extraction.csv`);
+    link.setAttribute("download", `${selectedReport.id}${dateSuffix}_Extraction.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -439,7 +475,61 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
     setIsExportDialogOpen(false);
   };
 
-  const handleExportClick = (type: 'excel' | 'csv') => {
+  const sendEmail = async () => {
+    setIsSendingEmail(true);
+    setEmailError(null);
+    setEmailSuccess(false);
+
+    try {
+      const dateSuffix = getReportDateSuffix();
+      const fileName = `${selectedReport.id}${dateSuffix}_Extraction.xlsx`;
+      
+      const dataToExport = selectedExportFields.length > 0 
+        ? filteredData.map(record => {
+            const filteredRow: any = {};
+            selectedExportFields.forEach(field => {
+              filteredRow[field] = record[field];
+            });
+            return filteredRow;
+          })
+        : filteredData;
+
+      const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Extracted Records");
+      
+      // Generate base64
+      const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'base64' });
+
+      const response = await fetch('/api/send-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: emailAddresses.split(',').map(e => e.trim()).filter(e => e !== ''),
+          subject: `${networkName} Extraction Report: ${selectedReport.id}${dateSuffix}`,
+          body: `<p>Please find attached the extracted report for <b>${selectedReport.name}</b>.</p><p>Total Records: ${filteredData.length}</p>`,
+          fileName,
+          fileContent: excelBuffer,
+          fileType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        })
+      });
+
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Failed to send email');
+
+      setEmailSuccess(true);
+      setTimeout(() => {
+        setIsExportDialogOpen(false);
+        setEmailSuccess(false);
+      }, 2000);
+    } catch (err: any) {
+      setEmailError(err.message);
+    } finally {
+      setIsSendingEmail(false);
+    }
+  };
+
+  const handleExportClick = (type: 'excel' | 'csv' | 'email') => {
     setExportType(type);
     setIsExportDialogOpen(true);
   };
@@ -504,7 +594,7 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-widest">{networkName} Configuration</h2>
             <Badge variant="outline" className="text-[9px] font-bold py-0 h-4 px-1.5 text-gray-400">
-              v1.5.0
+              v1.6.0
             </Badge>
           </div>
           <div className="space-y-4">
@@ -749,6 +839,10 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
                           </Tabs>
                         </div>
                         <div className="flex items-center gap-2">
+                          <Button variant="outline" size="sm" onClick={() => handleExportClick('email')} className="gap-2">
+                            <Mail className="w-4 h-4" />
+                            Email Report
+                          </Button>
                           <Button variant="outline" size="sm" onClick={() => handleExportClick('csv')} className="gap-2">
                             <FileText className="w-4 h-4" />
                             Export CSV
@@ -763,13 +857,30 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
                       <Dialog open={isExportDialogOpen} onOpenChange={setIsExportDialogOpen}>
                         <DialogContent className="max-w-md">
                           <DialogHeader>
-                            <DialogTitle>Export Settings</DialogTitle>
+                            <DialogTitle>{exportType === 'email' ? 'Email Report' : 'Export Settings'}</DialogTitle>
                             <DialogDescription>
-                              Select the fields you want to include in your {exportType === 'excel' ? 'Excel' : 'CSV'} report.
+                              {exportType === 'email' 
+                                ? 'Send the extracted report as an Excel attachment to specified recipients.'
+                                : `Select the fields you want to include in your ${exportType === 'excel' ? 'Excel' : 'CSV'} report.`}
                             </DialogDescription>
                           </DialogHeader>
 
                           <div className="space-y-4 py-4">
+                            {exportType === 'email' && (
+                              <div className="space-y-2">
+                                <Label htmlFor="emails">Recipients (comma separated)</Label>
+                                <Input 
+                                  id="emails"
+                                  placeholder="finance@example.com, audit@example.com"
+                                  value={emailAddresses}
+                                  onChange={(e) => setEmailAddresses(e.target.value)}
+                                  className="text-sm"
+                                />
+                                {emailError && <p className="text-xs text-red-500 font-medium">{emailError}</p>}
+                                {emailSuccess && <p className="text-xs text-green-600 font-bold flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Email sent successfully!</p>}
+                              </div>
+                            )}
+
                             <div className="flex items-center justify-between">
                               <span className="text-sm font-medium">Fields to Include</span>
                               <div className="flex gap-2">
@@ -801,13 +912,25 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
 
                           <DialogFooter>
                             <Button variant="outline" onClick={() => setIsExportDialogOpen(false)}>Cancel</Button>
-                            <Button 
-                              onClick={exportType === 'excel' ? exportToExcel : exportToCSV}
-                              disabled={selectedExportFields.length === 0}
-                              style={{ backgroundColor: accentColor }}
-                            >
-                              Download {exportType === 'excel' ? 'Excel' : 'CSV'}
-                            </Button>
+                            {exportType === 'email' ? (
+                              <Button 
+                                onClick={sendEmail}
+                                disabled={selectedExportFields.length === 0 || !emailAddresses.trim() || isSendingEmail}
+                                style={{ backgroundColor: accentColor }}
+                                className="gap-2"
+                              >
+                                {isSendingEmail && <Loader2 className="w-4 h-4 animate-spin" />}
+                                Send Email
+                              </Button>
+                            ) : (
+                              <Button 
+                                onClick={exportType === 'excel' ? exportToExcel : exportToCSV}
+                                disabled={selectedExportFields.length === 0}
+                                style={{ backgroundColor: accentColor }}
+                              >
+                                Download {exportType === 'excel' ? 'Excel' : 'CSV'}
+                              </Button>
+                            )}
                           </DialogFooter>
                         </DialogContent>
                       </Dialog>

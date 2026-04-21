@@ -36,7 +36,7 @@ export default function App() {
         </div>
         <div className="flex items-center gap-4">
           <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 px-3 py-1">
-            v1.5.0 - Expert Extraction
+            v1.6.0 - Full-Stack Delivery
           </Badge>
           <Button variant="ghost" size="icon" className="rounded-full">
             <Settings className="w-5 h-5 text-gray-500" />
