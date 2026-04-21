@@ -505,7 +505,7 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          to: emailAddresses.split(',').map(e => e.trim()).filter(e => e !== ''),
+          to: emailAddresses.split(/[;,]/).map(e => e.trim()).filter(Boolean),
           subject: `${networkName} Extraction Report: ${selectedReport.id}${dateSuffix}`,
           body: `<p>Please find attached the extracted report for <b>${selectedReport.name}</b>.</p><p>Total Records: ${filteredData.length}</p>`,
           fileName,
