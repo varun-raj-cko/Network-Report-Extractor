@@ -156,8 +156,12 @@ async function startServer() {
   const PORT = 3000;
 
   // Middleware
-  app.use(express.json({ limit: '50mb' }));
+  app.use(express.json({ limit: '100mb' }));
   app.use(cors());
+
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok", time: new Date().toISOString() });
+  });
 
   // Automation APIs
   app.get("/api/automation/jobs", (req, res) => {
@@ -226,10 +230,18 @@ async function startServer() {
 
   // Email API Route
   app.post("/api/send-report", async (req, res) => {
-    console.log(`[Email] Manual request received for: ${req.body.to}`);
+    const requestSize = JSON.stringify(req.body).length;
+    console.log(`[Email] Request received. To: ${JSON.stringify(req.body.to)}. Size: ${(requestSize / 1024 / 1024).toFixed(2)} MB`);
+    
     const { to, subject, body, fileName, fileContent } = req.body;
     
+    if (!to || (Array.isArray(to) && to.length === 0)) {
+      console.error("[Email] Error: No recipients provided");
+      return res.status(400).json({ error: "No recipients provided" });
+    }
+
     try {
+      console.log(`[Email] Transporting to: ${to}`);
       const info = await sendEmailHelper(
         to, 
         subject || "Network Report Extraction", 
@@ -240,7 +252,7 @@ async function startServer() {
       console.log(`[Email] Success! Message ID: ${info.messageId}`);
       res.json({ success: true, id: info.messageId });
     } catch (error: any) {
-      console.error("[Email] Critical Error:", error);
+      console.error("[Email] Critical Error during sending:", error.message);
       
       let errorMessage = error.message || "Failed to send email";
       if (errorMessage.includes("Invalid login")) {

@@ -535,6 +535,12 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
       
       // Generate base64
       const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'base64' });
+      const payloadSize = (excelBuffer.length * 0.75) / 1024 / 1024; // approx MB
+      console.log(`[Export] Prepare to send email. Attachment size: ~${payloadSize.toFixed(2)} MB`);
+
+      if (payloadSize > 20) {
+        throw new Error(`Report is too large to email (~${payloadSize.toFixed(2)} MB). Please use the manual 'Download' button instead.`);
+      }
 
       const response = await fetch('/api/send-report', {
         method: 'POST',
@@ -547,6 +553,9 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
           fileContent: excelBuffer,
           fileType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         })
+      }).catch(err => {
+        console.error("[Email] Fetch encountered error:", err);
+        throw new Error("Network Error: The request could not reach the server. This usually happens if the report is too large or the server is temporarily unavailable.");
       });
 
       const result = await response.json();
