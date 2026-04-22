@@ -406,27 +406,44 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
   const getReportDateSuffix = useCallback(() => {
     if (filteredData.length === 0) return '';
     
-    const dateFields = [
+    // 1. Identify fields that likely contain dates from the actual data header
+    const recordKeys = Object.keys(filteredData[0]);
+    const potentialDateFields = recordKeys.filter(key => 
+      key.toLowerCase().includes('date') || 
+      key.toLowerCase().includes('run')
+    );
+
+    // 2. Comprehensive list of common network report date fields
+    const commonDateFields = [
       'Run Date', 
       'Central Processing Date', 
       'Purchase Date', 
       'Transaction Date', 
       'Processing Date',
       'Central Site Business Date',
-      'Central Site Processing Date of Original Message'
+      'Central Site Processing Date of Original Message',
+      'Date and Time, Local Transaction',
+      'Proc Date'
     ];
     
-    for (const record of filteredData) {
-      for (const field of dateFields) {
+    // Combine and prioritize
+    const searchFields = Array.from(new Set([...potentialDateFields, ...commonDateFields]));
+    
+    // Scan records to find a valid date value
+    for (const record of filteredData.slice(0, 20)) { 
+      for (const field of searchFields) {
         if (record[field]) {
           const val = String(record[field]).replace(/[^0-9]/g, '');
-          if (val.length >= 4) {
-            return `_${val}`;
+          // Look for 6 (YYMMDD) or 8 (YYYYMMDD) or more (timestamps)
+          if (val.length >= 6) {
+            // For longer timestamps (like 12-digit Mastercard local time), take the date portion
+            return `_${val.substring(0, 8)}`;
           }
         }
       }
     }
     
+    // Fallback to current date if no data date is found
     return `_${new Date().toISOString().split('T')[0].replace(/-/g, '')}`;
   }, [filteredData]);
 
@@ -638,7 +655,7 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-widest">{networkName} Configuration</h2>
             <Badge variant="outline" className="text-[9px] font-bold py-0 h-4 px-1.5 text-gray-400">
-              v1.8.2
+              v1.8.4
             </Badge>
           </div>
           <div className="space-y-4">
