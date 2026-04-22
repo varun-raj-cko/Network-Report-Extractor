@@ -434,9 +434,25 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
       for (const field of searchFields) {
         if (record[field]) {
           const val = String(record[field]).replace(/[^0-9]/g, '');
-          // Look for 6 (YYMMDD) or 8 (YYYYMMDD) or more (timestamps)
-          if (val.length >= 6) {
-            // For longer timestamps (like 12-digit Mastercard local time), take the date portion
+          
+          if (val.length === 6) {
+            if (val.startsWith('26')) return `_2026${val.substring(2)}`; // YYMMDD
+            if (val.endsWith('26')) return `_2026${val.substring(2, 4)}${val.substring(0, 2)}`; // DDMMYY
+            return `_${val}`;
+          }
+          
+          if (val.length === 8) {
+            if (val.startsWith('2026')) return `_${val}`; // YYYYMMDD
+            if (val.endsWith('2026')) return `_2026${val.substring(2, 4)}${val.substring(0, 2)}`; // DDMMYYYY
+            return `_${val}`;
+          }
+
+          if (val.length === 12) {
+            // Mastercard local time is MMDDHHMMSS, we assume 2026
+            return `_2026${val.substring(0, 4)}`;
+          }
+
+          if (val.length > 0) {
             return `_${val.substring(0, 8)}`;
           }
         }
@@ -655,7 +671,7 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-widest">{networkName} Configuration</h2>
             <Badge variant="outline" className="text-[9px] font-bold py-0 h-4 px-1.5 text-gray-400">
-              v1.8.4
+              v1.8.5
             </Badge>
           </div>
           <div className="space-y-4">
