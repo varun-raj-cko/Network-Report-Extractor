@@ -443,6 +443,18 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
       : filteredData;
 
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    
+    // Force long numeric strings to be treated as text to prevent Excel from rounding or using scientific notation
+    Object.keys(worksheet).forEach(cellKey => {
+      if (cellKey.startsWith('!')) return;
+      const cell = worksheet[cellKey];
+      // If value is a string that looks like a long number (10+ digits), force it to Text type 's'
+      if (cell.v && typeof cell.v === 'string' && /^\d+$/.test(cell.v) && cell.v.length >= 10) {
+        cell.t = 's';
+        cell.z = '@'; // Force text format
+      }
+    });
+
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Extracted Records");
     XLSX.writeFile(workbook, `${selectedReport.id}${dateSuffix}_Extraction.xlsx`);
@@ -462,6 +474,17 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
       : filteredData;
 
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    
+    // Formulate CSV in a way that Excel respects long numeric strings if opened directly
+    Object.keys(worksheet).forEach(cellKey => {
+      if (cellKey.startsWith('!')) return;
+      const cell = worksheet[cellKey];
+      if (cell.v && typeof cell.v === 'string' && /^\d+$/.test(cell.v) && cell.v.length >= 10) {
+        // Keeping them as pure strings in the worksheet before conversion helps.
+        cell.t = 's';
+      }
+    });
+
     const csv = XLSX.utils.sheet_to_csv(worksheet);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
@@ -495,6 +518,18 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
         : filteredData;
 
       const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+
+      // Force long numeric strings to be treated as text to prevent Excel from rounding or using scientific notation
+      Object.keys(worksheet).forEach(cellKey => {
+        if (cellKey.startsWith('!')) return;
+        const cell = worksheet[cellKey];
+        // If value is a string that looks like a long number (10+ digits), force it to Text type 's'
+        if (cell.v && typeof cell.v === 'string' && /^\d+$/.test(cell.v) && cell.v.length >= 10) {
+          cell.t = 's';
+          cell.z = '@'; // Force text format
+        }
+      });
+
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "Extracted Records");
       
@@ -594,7 +629,7 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-widest">{networkName} Configuration</h2>
             <Badge variant="outline" className="text-[9px] font-bold py-0 h-4 px-1.5 text-gray-400">
-              v1.6.1
+              v1.8.1
             </Badge>
           </div>
           <div className="space-y-4">

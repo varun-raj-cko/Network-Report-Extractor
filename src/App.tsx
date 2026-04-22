@@ -4,7 +4,8 @@ import {
   Settings,
   CheckCircle2,
   CreditCard,
-  ArrowRight
+  ArrowRight,
+  Zap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -15,8 +16,9 @@ import { Separator } from '@/components/ui/separator';
 import { REPORT_SCHEMAS } from '@/src/constants/schemas';
 import { VISA_REPORT_SCHEMAS } from '@/src/constants/visa_schemas';
 import { ReportExtractor } from '@/src/components/ReportExtractor';
+import { AutomationManager } from '@/src/components/AutomationManager';
 
-type ViewState = 'landing' | 'mastercard' | 'visa';
+type ViewState = 'landing' | 'mastercard' | 'visa' | 'automation';
 
 export default function App() {
   const [view, setView] = useState<ViewState>('landing');
@@ -35,8 +37,17 @@ export default function App() {
           </div>
         </div>
         <div className="flex items-center gap-4">
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => setView('automation')}
+            className={`gap-2 ${view === 'automation' ? 'bg-gray-100 text-blue-600' : 'text-gray-500'}`}
+          >
+            <Zap className="w-4 h-4" />
+            Automation
+          </Button>
           <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 px-3 py-1">
-            v1.6.1 - Enhanced Delivery
+            v1.8.1 - Data Integrity Patch
           </Badge>
           <Button variant="ghost" size="icon" className="rounded-full">
             <Settings className="w-5 h-5 text-gray-500" />
@@ -122,7 +133,7 @@ export default function App() {
               onBack={() => setView('landing')} 
             />
           </motion.div>
-        ) : (
+        ) : view === 'visa' ? (
           <motion.div 
             key="visa"
             initial={{ opacity: 0, x: 20 }}
@@ -136,6 +147,16 @@ export default function App() {
               accentColor="#1A1F71" 
               onBack={() => setView('landing')} 
             />
+          </motion.div>
+        ) : (
+          <motion.div
+            key="automation"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            className="flex-1 overflow-auto"
+          >
+            <AutomationManager />
           </motion.div>
         )}
       </AnimatePresence>
