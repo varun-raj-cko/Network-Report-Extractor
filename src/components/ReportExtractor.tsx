@@ -629,7 +629,7 @@ export function ReportExtractor({ schemas, networkName, accentColor, onBack }: R
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-widest">{networkName} Configuration</h2>
             <Badge variant="outline" className="text-[9px] font-bold py-0 h-4 px-1.5 text-gray-400">
-              v1.8.1
+              v1.8.2
             </Badge>
           </div>
           <div className="space-y-4">

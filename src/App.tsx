@@ -47,7 +47,7 @@ export default function App() {
             Automation
           </Button>
           <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 px-3 py-1">
-            v1.8.1 - Data Integrity Patch
+            v1.8.2 - Precision Extraction
           </Badge>
           <Button variant="ghost" size="icon" className="rounded-full">
             <Settings className="w-5 h-5 text-gray-500" />

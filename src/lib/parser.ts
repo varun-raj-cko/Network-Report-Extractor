@@ -91,7 +91,12 @@ export function parseTN070File(content: string, schema: ReportSchema, preSplitLi
       const flen = field.length;
       const rawValue = line.substring(offset, offset + flen).trim();
       
-      record[field.name] = field.type === 'Numeric' ? (parseInt(rawValue, 10) || rawValue) : rawValue;
+      // For numeric fields, we convert to number only if it fits in a safe integer (15 digits or less)
+      // and doesn't loss leading zeros which can be important for reference IDs.
+      // This preventing large identifiers like ARD (23 digits) from being converted to e+22 format.
+      const shouldKeepAsString = field.type !== 'Numeric' || rawValue.length > 15 || (rawValue.startsWith('0') && rawValue.length > 1);
+      
+      record[field.name] = shouldKeepAsString ? rawValue : (Number(rawValue) || 0);
 
       const fn = field.name.toLowerCase();
       if (fn.includes('currency') && fn.includes('code')) {
